@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # 1. The VaultPay API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vaultpay-api
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=vault_admin
+      - DB_PASSWORD=vault_secure_pass
+      - DB_NAME=vaultpay_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - vaultpay-network
+
+  # 2. PostgreSQL 16 Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: vaultpay-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=vault_admin
+      - POSTGRES_PASSWORD=vault_secure_pass
+      - POSTGRES_DB=vaultpay_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vault_admin -d vaultpay_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vaultpay-network
+
+  # 3. Redis 7 Cache & Lock Manager
+  redis:
+    image: redis:7-alpine
+    container_name: vaultpay-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vaultpay-network
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  vaultpay-network:
+    driver: bridge
