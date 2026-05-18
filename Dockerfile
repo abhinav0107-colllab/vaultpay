@@ -27,10 +27,14 @@ RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 
-# Copy the compiled binary from the builder stage
+# 1. Copy the compiled application binary from the builder stage
 COPY --from=builder /app/vaultpay .
 
-# Expose the API port (adjust if your Go app runs on a different port)
+# 🟩 FIX: 2. Copy the migrations folder into your runtime environment!
+# This takes the SQL folder from Stage 1 and places it into the final container disk
+COPY --from=builder /app/migrations ./migrations
+
+# Expose the API port
 EXPOSE 8080
 
 # Run the binary

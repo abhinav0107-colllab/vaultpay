@@ -1,0 +1,22 @@
+# Binaries and executables
+vaultpay
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Dependency directories
+vendor/
+
+# IDE specific files
+.vscode/
+.idea/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Docker data (we don't want to push your actual database files!)
+pgdata/
+redisdata/

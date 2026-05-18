@@ -4,7 +4,7 @@ services:
   # 1. The VaultPay API Service
   api:
     build:
-      context: .
+      context: .                  # Tells Docker to look at the entire root directory
       dockerfile: Dockerfile
     container_name: vaultpay-api
     ports:
