@@ -28,6 +28,17 @@ func (h *PaymentHandler) CreateChargeHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// 🔥 VALIDATION CHECK BLOCK START
+	if req.UserID == "" {
+		http.Error(w, "user_id is a mandatory required field", http.StatusUnprocessableEntity)
+		return
+	}
+	if req.Amount <= 0 {
+		http.Error(w, "transaction amount must be strictly positive", http.StatusUnprocessableEntity)
+		return
+	}
+	// 🔥 VALIDATION CHECK BLOCK END
+
 	payment, err := h.paymentService.ProcessCharge(r.Context(), req.UserID, req.Amount, req.Currency)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
