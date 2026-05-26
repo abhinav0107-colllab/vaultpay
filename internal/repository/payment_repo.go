@@ -7,13 +7,16 @@ import (
 	"time"
 )
 
+type PaymentStatus string
+
 type Payment struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
-	Amount    int64     `json:"amount"` // Measured in smaller subunits (Paise)
+	Amount    int64     `json:"amount"`
 	Currency  string    `json:"currency"`
-	Status    string    `json:"status"` // "PENDING", "COMPLETED", "FAILED"
+	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"` // <-- ADD THIS LINE
 }
 
 type PaymentRepository struct {
@@ -75,4 +78,69 @@ func (r *PaymentRepository) CreateTransactionRecord(ctx context.Context, userID 
 	}
 
 	return p, nil
+}
+
+// RefundTransactionRecord safely processes a refund event, validating the state machine rules
+func (r *PaymentRepository) RefundTransactionRecord(ctx context.Context, paymentID string) (*Payment, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open refund transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 1. Fetch current transaction status and merchant information under an exclusive FOR UPDATE lock
+	var p Payment
+	query := `
+		SELECT id, user_id, amount, currency, status, created_at, updated_at 
+		FROM payments 
+		WHERE id = $1 FOR UPDATE`
+
+	err = tx.QueryRowContext(ctx, query, paymentID).Scan(&p.ID, &p.UserID, &p.Amount, &p.Currency, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("payment record not found or lock acquisition timed out: %w", err)
+	}
+	if p.Status != "succeeded" && p.Status != "paid" {
+		return nil, fmt.Errorf("invalid state transition: cannot refund a transaction with status '%s'", p.Status)
+	}
+	updateUserQuery := `UPDATE users SET balance = balance + $1 WHERE id = $2`
+	_, err = tx.ExecContext(ctx, updateUserQuery, p.Amount, p.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to return funds to user wallet balance: %w", err)
+	}
+
+	// 4. Update the payment status to 'refunded' inside our system matrix
+	updatePaymentQuery := `
+		UPDATE payments 
+		SET status = 'refunded', updated_at = CURRENT_TIMESTAMP 
+		WHERE id = $1 
+		RETURNING status, updated_at`
+
+	err = tx.QueryRowContext(ctx, updatePaymentQuery, paymentID).Scan(&p.Status, &p.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update payment record lifecycle status: %w", err)
+	}
+
+	// 5. Securely commit our balance restorations onto the physical disk
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit financial refund block: %w", err)
+	}
+
+	return &p, nil
+}
+
+// UpdatePaymentStatus updates the status of a specific payment tracking record
+func (r *PaymentRepository) UpdatePaymentStatus(ctx context.Context, paymentID string, nextStatus string) error {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	query := `
+		UPDATE payments 
+		SET status = $1, updated_at = NOW() 
+		WHERE id = $2`
+
+	_, err := r.db.ExecContext(ctx, query, nextStatus, paymentID)
+	return err
 }

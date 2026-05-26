@@ -11,32 +11,56 @@ import (
 	"github.com/abhinav0107-collab/vaultpay/internal/service"
 )
 
-// TestCreateChargeHandler_Validation checks that our HTTP pipeline flags empty parameters cleanly
-func TestCreateChargeHandler_Validation(t *testing.T) {
-	// 1. Setup a clean, independent testing stack instance (passing nil for database since we expect validation to fail early)
-	paymentRepo := repository.NewPaymentRepository(nil)
-	paymentServ := service.NewPaymentService(paymentRepo)
-	paymentHand := handler.NewPaymentHandler(paymentServ)
-
-	// 2. Draft a malformed JSON payload missing a valid target User ID string
-	invalidJSON := []byte(`{"user_id": "", "amount": 25000, "currency": "INR"}`)
-
-	// 3. Construct a mock HTTP request inside computer memory
-	req, err := http.NewRequest("POST", "/v1/charges", bytes.NewBuffer(invalidJSON))
-	if err != nil {
-		t.Fatalf("Failed to initialize test request entity context: %v", err)
+func TestCreateChargeHandler_ComprehensiveValidation(t *testing.T) {
+	// 1. Define our test cases table grid matrix
+	testCases := []struct {
+		name           string
+		requestPayload string
+		expectedStatus int
+	}{
+		{
+			name:           "Failure Path - Missing User ID String",
+			requestPayload: `{"user_id": "", "amount": 25000, "currency": "INR"}`,
+			expectedStatus: http.StatusUnprocessableEntity, // 422
+		},
+		{
+			name:           "Failure Path - Negative Or Zero Transaction Amount",
+			requestPayload: `{"user_id": "user_uuid_999", "amount": -500, "currency": "INR"}`,
+			expectedStatus: http.StatusUnprocessableEntity, // 422
+		},
+		{
+			name:           "Failure Path - Malformed Broken JSON Body",
+			requestPayload: `{"user_id": "user_uuid_111", "amount": 5000,`, // missing bracket
+			expectedStatus: http.StatusBadRequest,                          // 400
+		},
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	// 4. Instantiate a virtual response recorder to capture the handler's output signatures
-	rr := httptest.NewRecorder()
+	// 2. Loop through our matrix rows executing isolated testing conditions
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Setup clean infrastructure dependencies for every test step iteration
+			paymentRepo := repository.NewPaymentRepository(nil)
+			paymentServ := service.NewPaymentService(paymentRepo)
+			paymentHand := handler.NewPaymentHandler(paymentServ)
 
-	// 5. Fire the request directly into the isolated Go handler function
-	handlerFunc := http.HandlerFunc(paymentHand.CreateChargeHandler)
-	handlerFunc.ServeHTTP(rr, req)
+			// Construct virtual HTTP request pipeline inside memory architecture
+			req, err := http.NewRequest("POST", "/v1/charges", bytes.NewBuffer([]byte(tc.requestPayload)))
+			if err != nil {
+				t.Fatalf("Failed to initialize test request entity context: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
 
-	// 6. Assertions: Verify the system responded with a 422 Unprocessable Entity code
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Errorf("Unexpected status code returned: got %d, wanted %d", rr.Code, http.StatusUnprocessableEntity)
+			// Instantiate our response stream recorder state tracker
+			rr := httptest.NewRecorder()
+			handlerFunc := http.HandlerFunc(paymentHand.CreateChargeHandler)
+
+			// Fire request directly into handler context
+			handlerFunc.ServeHTTP(rr, req)
+
+			// Verify status response matching our expected limits matrices
+			if rr.Code != tc.expectedStatus {
+				t.Errorf("[%s] Unexpected status code returned: got %d, wanted %d", tc.name, rr.Code, tc.expectedStatus)
+			}
+		})
 	}
 }

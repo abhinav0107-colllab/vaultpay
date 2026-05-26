@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"time"
 
+	// 🔥 ADD THIS PROMETHEUS LINE TO YOUR IMPORTS:
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/abhinav0107-collab/vaultpay/internal/config"
 	"github.com/abhinav0107-collab/vaultpay/internal/database"
 	"github.com/abhinav0107-collab/vaultpay/internal/handler"
@@ -17,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	_ "github.com/lib/pq"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -93,6 +97,7 @@ func main() {
 
 	// 4. Setup Day 6 Idempotency Middleware Protection Engine
 	idemMW := customMW.NewIdempotencyMiddleware(rdb)
+	rateMW := customMW.NewRateLimiterMiddleware(rdb)
 
 	// Inject a standby test merchant on startup for easy routing tests
 	_, _ = userRepo.CreateUser("merchant_india@gmail.com", 1000000)
@@ -104,13 +109,34 @@ func main() {
 	r.Use(middleware.RequestID)      // Injects a unique tracking UUID per request
 	r.Use(customMW.StructuredLogger) // Processes custom log statistics per request
 	r.Use(middleware.Recoverer)      // Halts panics to maintain 100% server uptime
+	// 6. Attach Core Middleware Checkpoints
+	r.Use(middleware.RequestID)
+	r.Use(customMW.MetricsTracker)
+	r.Use(middleware.Recoverer)
+	webhookEngine := service.NewWebhookWorker(paymentRepo, "vaultpay_super_secret_signing_key_2026")
+
+	// Create a background worker context handle
+	bgCtx, cancelWorker := context.WithCancel(context.Background())
+	defer cancelWorker()
+
+	// Launch the loop concurrently using a goroutine!
+	go webhookEngine.StartWorkerEngine(bgCtx)
+
+	// 🔥 DAY 14: EXPOSE OPEN PROMETHEUS METRICS SCRAPE ENDPOINT
+	// This lets Prometheus pull performance and latency counters from your system
+	r.Handle("/metrics", promhttp.Handler())
 
 	// 7. Map REST API Endpoint Resource Routes
 	r.Route("/v1", func(r chi.Router) {
+		// FORCE ALL ENDPOINTS TO PASS THROUGH THE ATOMIC REDIS LUA LIMITER FIRST
+		r.Use(rateMW.Limit)
+
 		r.Post("/auth/keys", authHand.CreateAPIKeyHandler)
 
 		// Shields payment routes with defensive transactional idempotency
 		r.With(idemMW.Handle).Post("/charges", paymentHand.CreateChargeHandler)
+
+		r.Post("/refunds", paymentHand.CreateRefundHandler)
 	})
 
 	// 8. Fire up the actual HTTP web server listener

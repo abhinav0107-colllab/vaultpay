@@ -21,3 +21,9 @@ func (s *PaymentService) ProcessCharge(ctx context.Context, userID string, amoun
 	}
 	return s.paymentRepo.CreateTransactionRecord(ctx, userID, amount, currency)
 }
+func (s *PaymentService) ProcessRefund(ctx context.Context, paymentID string) (*repository.Payment, error) {
+	if paymentID == "" {
+		return nil, fmt.Errorf("payment tracking reference ID cannot be empty")
+	}
+	return s.paymentRepo.RefundTransactionRecord(ctx, paymentID)
+}

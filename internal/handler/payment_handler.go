@@ -49,3 +49,30 @@ func (h *PaymentHandler) CreateChargeHandler(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(payment)
 }
+
+type RefundRequest struct {
+	PaymentID string `json:"payment_id"`
+}
+
+func (h *PaymentHandler) CreateRefundHandler(w http.ResponseWriter, r *http.Request) {
+	var req RefundRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Malformed JSON layout payload string", http.StatusBadRequest)
+		return
+	}
+
+	if req.PaymentID == "" {
+		http.Error(w, "payment_id is a mandatory tracking field", http.StatusUnprocessableEntity)
+		return
+	}
+
+	payment, err := h.paymentService.ProcessRefund(r.Context(), req.PaymentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(payment)
+}
