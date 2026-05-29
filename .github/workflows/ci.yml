@@ -36,6 +36,7 @@ jobs:
         with:
           version: v1.55
           skip-cache: true
+          working-directory: .
 
       - name: Execute Test Suite with Data Race Detection
         # 🔥 DAY 20 SPECIFIC REQUIREMENT: -race detector ensures concurrent thread safety
