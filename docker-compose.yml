@@ -12,7 +12,6 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-    # 🔥 ENSURE POSTGRES IS LIVE BEFORE ACCEPTING OTHER CONNECTIONS
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d vaultpay"]
       interval: 5s
@@ -24,7 +23,6 @@ services:
     container_name: vaultpay-cache
     ports:
       - "6379:6379"
-    # 🔥 ENSURE REDIS IS LIVE BEFORE ACCEPTING CACHING TRANSACTIONS
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -46,12 +44,34 @@ services:
       DB_NAME: vaultpay
       REDIS_HOST: redis
       REDIS_PORT: 6379
-    # Wait strictly for our supporting infrastructure health layers to hit solid green states
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
+  # 📊 PROMETHEUS (Ensure this has exactly 2 spaces of indentation)
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: vaultpay-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - vaultpay-api
+
+  # 📉 GRAFANA (Ensure this has exactly 2 spaces of indentation)
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: vaultpay-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+
+# Global storage volumes (Must be all the way to the left border)
 volumes:
   pgdata:

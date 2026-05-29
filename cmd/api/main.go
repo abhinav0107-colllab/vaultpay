@@ -8,6 +8,7 @@ import (
 	"time"
 
 	// 🔥 ADD THIS PROMETHEUS LINE TO YOUR IMPORTS:
+	"github.com/hibiken/asynq"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/abhinav0107-collab/vaultpay/internal/config"
@@ -16,6 +17,7 @@ import (
 	customMW "github.com/abhinav0107-collab/vaultpay/internal/middleware"
 	"github.com/abhinav0107-collab/vaultpay/internal/repository"
 	"github.com/abhinav0107-collab/vaultpay/internal/service"
+	"github.com/abhinav0107-collab/vaultpay/internal/tasks"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -26,6 +28,14 @@ import (
 
 func main() {
 	log.Println("--- VaultPay Initializing ---")
+	// 🔥 DAY 19: EXPOSE PPROF PROFILING GATEWAY
+	// Exposes internal execution metrics on port :6060 for live load debugging
+	go func() {
+		log.Println("⏱️  PPROF PROFILER SERVER LISTENING ON PORT :6060")
+		if err := http.ListenAndServe("0.0.0.0:6060", nil); err != nil {
+			log.Printf("Pprof backend server error: %v", err)
+		}
+	}()
 
 	// 1. Load Configurations from Environment Variables
 	cfg, err := config.Load()
@@ -56,6 +66,11 @@ func main() {
 	}
 	defer db.Close()
 	log.Println("🟢 PostgreSQL Connection: SUCCESSFUL")
+	// 🔥 DAY 19 PERFORMANCE OPTIMIZATION: TUNE CONNECTION POOLS
+	// This prevents the Go engine from overwhelming Postgres and throwing EOF panics
+	db.SetMaxOpenConns(25)                 // Maximum number of open connections to the database
+	db.SetMaxIdleConns(25)                 // Maximum number of connections in the idle connection pool
+	db.SetConnMaxLifetime(5 * time.Minute) // Maximum amount of time a connection may be reused
 
 	// 3. Run Database Migrations Automatically
 	log.Println("Preparing database migrations...")
@@ -107,20 +122,35 @@ func main() {
 
 	// 6. Attach Core Middleware Checkpoints
 	r.Use(middleware.RequestID)      // Injects a unique tracking UUID per request
+	r.Use(customMW.MetricsTracker)   // 🔥 Day 17: Track every single transaction metric
 	r.Use(customMW.StructuredLogger) // Processes custom log statistics per request
 	r.Use(middleware.Recoverer)      // Halts panics to maintain 100% server uptime
-	// 6. Attach Core Middleware Checkpoints
-	r.Use(middleware.RequestID)
-	r.Use(customMW.MetricsTracker)
-	r.Use(middleware.Recoverer)
-	webhookEngine := service.NewWebhookWorker(paymentRepo, "vaultpay_super_secret_signing_key_2026")
 
-	// Create a background worker context handle
-	bgCtx, cancelWorker := context.WithCancel(context.Background())
-	defer cancelWorker()
+	// 🔥 DAY 16 (LEFT CARD): INITIALIZE REDIS ASYNQ BACKGROUND WORKER
+	// Connects our distributed background server to our Redis container
+	asynqServer := asynq.NewServer(
+		asynq.RedisClientOpt{Addr: "redis:6379"},
+		asynq.Config{
+			Concurrency: 5, // Process up to 5 concurrent webhook retry events safely
+			Queues: map[string]int{
+				"critical": 6,
+				"default":  3,
+			},
+		},
+	)
 
-	// Launch the loop concurrently using a goroutine!
-	go webhookEngine.StartWorkerEngine(bgCtx)
+	advancedWorker := service.NewAdvancedWebhookWorker(db, paymentRepo)
+	mux := asynq.NewServeMux()
+
+	// Bind our distributed task pattern routing
+	mux.HandleFunc(tasks.TypeWebhookRetryEvent, advancedWorker.ProcessWebhookTask)
+
+	// Spin up our Asynq engine inside a dedicated background goroutine thread
+	go func() {
+		if err := asynqServer.Run(mux); err != nil {
+			log.Fatalf("Critical loss of background worker engine execution loop: %v", err)
+		}
+	}()
 
 	// 🔥 DAY 14: EXPOSE OPEN PROMETHEUS METRICS SCRAPE ENDPOINT
 	// This lets Prometheus pull performance and latency counters from your system
@@ -138,6 +168,14 @@ func main() {
 
 		r.Post("/refunds", paymentHand.CreateRefundHandler)
 	})
+	// 🔥 DAY 19: PRODUCTION DATA SEEDING FOR K6 STRESS TESTS
+	// This ensures our load tests hit a valid record, bypassing database 404/422 crash barriers
+	_, err = userRepo.CreateUser("merchant_india@gmail.com", 10000000) // 100,000.00 minor currency units
+	if err != nil {
+		log.Printf("⚠️  Seeding Note: Test merchant user might already exist in tables: %v", err)
+	} else {
+		log.Println("✅ Production Test Merchant 'merchant_india@gmail.com' successfully seeded into PostgreSQL!")
+	}
 
 	// 8. Fire up the actual HTTP web server listener
 	log.Println("🚀 VAULTPAY INTERNET GATEWAY IS ONLINE & ACTIVE ON PORT :8080")

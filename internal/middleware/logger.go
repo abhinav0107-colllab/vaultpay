@@ -9,8 +9,15 @@ import (
 )
 
 // StructuredLogger intercepts incoming HTTP traffic and logs core execution metrics
+// StructuredLogger intercepts incoming HTTP traffic and logs core execution metrics
 func StructuredLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 🔥 SKIP TELEMETRY LOG SPAM FOR PROMETHEUS SCRAPES
+		if r.URL.Path == "/metrics" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		startTime := time.Now()
 
