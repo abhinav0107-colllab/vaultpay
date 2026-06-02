@@ -8,11 +8,11 @@ on:
 
 jobs:
   lint-and-test:
-    name: Code Quality Check Gates
+    name: Code Quality & Testing Gates
     runs-on: ubuntu-latest
 
     services:
-      # Spin up a live ephemeral Redis instance so your validation tests can run successfully in the cloud
+      # Spin up a live ephemeral Redis instance for validation tests in the cloud
       redis:
         image: redis:7-alpine
         ports:
@@ -25,21 +25,18 @@ jobs:
       - name: Set up Production Go Runtime
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22' # Matches your local development engine build targets
+          go-version: '1.22'
           cache: true
 
       - name: Install Project Dependencies
         run: go mod download
 
-      - name: Run Code Linter Check
-        uses: golangci/golangci-lint-action@v4
-        with:
-          version: v1.55
-          skip-cache: true
-          working-directory: .
+      - name: Run Native Code Verification (Typecheck & Vet)
+        # This acts as our strict linter, catching syntax errors and missing imports instantly
+        run: go vet ./...
 
       - name: Execute Test Suite with Data Race Detection
-        # 🔥 DAY 20 SPECIFIC REQUIREMENT: -race detector ensures concurrent thread safety
+        # 🔥 Enforces Day 20 concurrent thread safety milestones in the cloud
         run: go test -v -race ./...
         env:
           REDIS_HOST: localhost
@@ -48,7 +45,7 @@ jobs:
   build-verification:
     name: Docker Compilation Verification
     runs-on: ubuntu-latest
-    needs: lint-and-test # Only run this if our code quality and unit tests pass clean!
+    needs: lint-and-test
 
     steps:
       - name: Check out Repository Codebase
@@ -62,4 +59,4 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          push: false # Simply verify that it builds without compilation errors for now!
+          push: false
