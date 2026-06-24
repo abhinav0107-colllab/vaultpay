@@ -1,28 +1,35 @@
-
+# ==========================================
+# STAGE 1: Build the optimized Go binary executable
+# ==========================================
 FROM golang:1.26-alpine AS builder
+
 WORKDIR /app
 
+# Copy your vendor directory onto disk cleanly
 COPY go.mod go.sum ./
 COPY vendor/ ./vendor/
 
+# Copy the rest of your application source code tree onto disk
 COPY . .
 
+# Compile the final binary with production vendor optimizations
 RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o /app/vaultpay-api ./cmd/api/main.go
 
-FROM alpine:3.20 AS runner
-RUN apk add --no-cache ca-certificates tzdata
+# ==========================================
+# STAGE 2: Construct the lightweight scratch run container
+# ==========================================
+FROM alpine:3.19 AS runner
 
-WORKDIR /root/
+WORKDIR /app
 
+# Add security updates and root SSL CA certificates for safe HTTPS outbound calls
+RUN apk add --no-cache ca-certificates
+
+# Pull the compiled binary file from the builder sandbox stage layer
 COPY --from=builder /app/vaultpay-api .
 
-COPY --from=builder /app/migrations ./migrations
-
-COPY --from=builder /app/private_key.pem .
-COPY --from=builder /app/public_key.pem .
-
-# Expose our internet gateway port
+# Expose your application network listener port mapping
 EXPOSE 8080
 
-# Execute our compiled engine
+# Execute the application binary on container startup
 CMD ["./vaultpay-api"]
