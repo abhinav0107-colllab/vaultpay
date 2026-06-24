@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
 
-	// 🔥 ADD THIS PROMETHEUS LINE TO YOUR IMPORTS:
 	"github.com/hibiken/asynq"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -28,8 +28,7 @@ import (
 
 func main() {
 	log.Println("--- VaultPay Initializing ---")
-	// 🔥 DAY 19: EXPOSE PPROF PROFILING GATEWAY
-	// Exposes internal execution metrics on port :6060 for live load debugging
+	// EXPOSE PPROF PROFILING GATEWAY
 	go func() {
 		log.Println("⏱️  PPROF PROFILER SERVER LISTENING ON PORT :6060")
 		if err := http.ListenAndServe("0.0.0.0:6060", nil); err != nil {
@@ -43,7 +42,7 @@ func main() {
 		log.Fatalf("Failed to initialize configuration settings: %v", err)
 	}
 
-	// 2. Establish PostgreSQL Connection Pool (With a robust Retry Loop)
+	// 2. Establish PostgreSQL Connection Pool
 	var db *sql.DB
 	dsn := cfg.GetDSN()
 
@@ -51,7 +50,7 @@ func main() {
 		log.Printf("Connecting to PostgreSQL (Attempt %d/5)...", i)
 		db, err = sql.Open("postgres", dsn)
 		if err == nil {
-			err = db.Ping() // Verifies the connection is actually functional
+			err = db.Ping()
 		}
 
 		if err == nil {
@@ -66,11 +65,10 @@ func main() {
 	}
 	defer db.Close()
 	log.Println("🟢 PostgreSQL Connection: SUCCESSFUL")
-	// 🔥 DAY 19 PERFORMANCE OPTIMIZATION: TUNE CONNECTION POOLS
-	// This prevents the Go engine from overwhelming Postgres and throwing EOF panics
-	db.SetMaxOpenConns(25)                 // Maximum number of open connections to the database
-	db.SetMaxIdleConns(25)                 // Maximum number of connections in the idle connection pool
-	db.SetConnMaxLifetime(5 * time.Minute) // Maximum amount of time a connection may be reused
+
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(25)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	// 3. Run Database Migrations Automatically
 	log.Println("Preparing database migrations...")
@@ -83,7 +81,6 @@ func main() {
 		Addr: cfg.RedisHost + ":" + cfg.RedisPort,
 	})
 
-	// Use a context background timeline to ping Redis
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -93,7 +90,7 @@ func main() {
 	log.Println("🟢 Redis Connection: SUCCESSFUL")
 
 	// ========================================================================
-	// 🚀 ROUTER & HTTP ENGINE CORE (DAYS 4, 5 & 6)
+	// 🚀 ROUTER & HTTP ENGINE CORE
 	// ========================================================================
 	log.Println("Configuring routing architecture and middleware pipelines...")
 
@@ -101,16 +98,27 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	keyRepo := repository.NewKeyRepository(db)
 	paymentRepo := repository.NewPaymentRepository(db)
+	auditRepo := repository.NewAuditRepository(db)
 
 	// 2. Initialize Core Domain Business Services
 	authServ := service.NewAuthService(keyRepo)
 	paymentServ := service.NewPaymentService(paymentRepo)
+	subServ := service.NewSubscriptionService()
+	disputeServ := service.NewDisputeService()
+
+	jwtServ, err := service.NewJWTAuthService(rdb, "private_key.pem", "public_key.pem")
+	if err != nil {
+		log.Fatalf("CRITICAL: Failed to seed RSA Cryptographic Keys: %v", err)
+	}
 
 	// 3. Initialize REST Presentation Handlers
 	authHand := handler.NewAuthHandler(authServ)
 	paymentHand := handler.NewPaymentHandler(paymentServ)
+	subHand := handler.NewSubscriptionHandler(subServ)
+	disputeHand := handler.NewDisputeHandler(disputeServ)
+	jwtHand := handler.NewJWTAuthHandler(jwtServ)
 
-	// 4. Setup Day 6 Idempotency Middleware Protection Engine
+	// 4. Setup Idempotency & Rate Middleware Engines
 	idemMW := customMW.NewIdempotencyMiddleware(rdb)
 	rateMW := customMW.NewRateLimiterMiddleware(rdb)
 
@@ -120,18 +128,32 @@ func main() {
 	// 5. Instantiate the Chi Router Engine
 	r := chi.NewRouter()
 
-	// 6. Attach Core Middleware Checkpoints
-	r.Use(middleware.RequestID)      // Injects a unique tracking UUID per request
-	r.Use(customMW.MetricsTracker)   // 🔥 Day 17: Track every single transaction metric
-	r.Use(customMW.StructuredLogger) // Processes custom log statistics per request
-	r.Use(middleware.Recoverer)      // Halts panics to maintain 100% server uptime
+	// THE CORS FIX: Explicitly grant permission to your Swagger dashboard container
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:8081")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
 
-	// 🔥 DAY 16 (LEFT CARD): INITIALIZE REDIS ASYNQ BACKGROUND WORKER
-	// Connects our distributed background server to our Redis container
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	// 6. Attach Core Middleware Checkpoints
+	r.Use(middleware.RequestID)
+	r.Use(customMW.MetricsTracker)
+	r.Use(customMW.StructuredLogger)
+	r.Use(middleware.Recoverer)
+
+	// INITIALIZE REDIS ASYNQ BACKGROUND WORKER
 	asynqServer := asynq.NewServer(
 		asynq.RedisClientOpt{Addr: "redis:6379"},
 		asynq.Config{
-			Concurrency: 5, // Process up to 5 concurrent webhook retry events safely
+			Concurrency: 5,
 			Queues: map[string]int{
 				"critical": 6,
 				"default":  3,
@@ -141,36 +163,44 @@ func main() {
 
 	advancedWorker := service.NewAdvancedWebhookWorker(db, paymentRepo)
 	mux := asynq.NewServeMux()
-
-	// Bind our distributed task pattern routing
 	mux.HandleFunc(tasks.TypeWebhookRetryEvent, advancedWorker.ProcessWebhookTask)
 
-	// Spin up our Asynq engine inside a dedicated background goroutine thread
 	go func() {
 		if err := asynqServer.Run(mux); err != nil {
 			log.Fatalf("Critical loss of background worker engine execution loop: %v", err)
 		}
 	}()
 
-	// 🔥 DAY 14: EXPOSE OPEN PROMETHEUS METRICS SCRAPE ENDPOINT
-	// This lets Prometheus pull performance and latency counters from your system
+	// EXPOSE OPEN PROMETHEUS METRICS SCRAPE ENDPOINT
 	r.Handle("/metrics", promhttp.Handler())
 
 	// 7. Map REST API Endpoint Resource Routes
 	r.Route("/v1", func(r chi.Router) {
-		// FORCE ALL ENDPOINTS TO PASS THROUGH THE ATOMIC REDIS LUA LIMITER FIRST
 		r.Use(rateMW.Limit)
+		r.Post("/auth/token", jwtHand.IssueTokenHandler)
+		r.Post("/auth/revoke", jwtHand.RevokeTokenHandler)
 
 		r.Post("/auth/keys", authHand.CreateAPIKeyHandler)
-
-		// Shields payment routes with defensive transactional idempotency
 		r.With(idemMW.Handle).Post("/charges", paymentHand.CreateChargeHandler)
-
 		r.Post("/refunds", paymentHand.CreateRefundHandler)
+		r.Post("/subscriptions", subHand.CreateSubscriptionHandler)
+		r.Post("/disputes", disputeHand.CreateDisputeHandler)
+
+		// Day 23 Event Sourcing Audit History Track mapping
+		r.Get("/payments/{id}/history", func(w http.ResponseWriter, r *http.Request) {
+			paymentID := chi.URLParam(r, "id")
+			analysis, err := auditRepo.AnalyzeTransitions(paymentID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(analysis)
+		})
 	})
-	// 🔥 DAY 19: PRODUCTION DATA SEEDING FOR K6 STRESS TESTS
-	// This ensures our load tests hit a valid record, bypassing database 404/422 crash barriers
-	_, err = userRepo.CreateUser("merchant_india@gmail.com", 10000000) // 100,000.00 minor currency units
+
+	// PRODUCTION DATA SEEDING FOR K6 STRESS TESTS
+	_, err = userRepo.CreateUser("merchant_india@gmail.com", 10000000)
 	if err != nil {
 		log.Printf("⚠️  Seeding Note: Test merchant user might already exist in tables: %v", err)
 	} else {

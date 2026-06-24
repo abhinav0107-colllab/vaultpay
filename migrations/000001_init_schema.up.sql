@@ -37,3 +37,12 @@ CREATE TABLE payments (
 -- Indexing for speed
 CREATE INDEX idx_payments_user_id ON payments(user_id);
 CREATE INDEX idx_api_keys_user_id ON api_keys(user_id);
+CREATE TABLE IF NOT EXISTS payment_events (
+    id SERIAL PRIMARY KEY,
+    payment_id VARCHAR(50) NOT NULL,
+    event_type VARCHAR(50) NOT NULL, -- e.g., "PAYMENT_CREATED", "PAYMENT_AUTHORIZED", "PAYMENT_FAILED"
+    payload JSONB NOT NULL,          -- Stores full metadata snapshot at that exact second
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_events_payment_id ON payment_events(payment_id);

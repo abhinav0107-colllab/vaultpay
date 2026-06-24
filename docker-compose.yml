@@ -49,8 +49,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # 🔥 MOUNTED THE CRYPTOGRAPHIC PEM KEYS INTO THE APPLICATION CONTAINER WORKING DIRECTORY:
+    volumes:
+      - .:/app
+      - ./private_key.pem:/app/private_key.pem
+      - ./public_key.pem:/app/public_key.pem
 
-  # 📊 PROMETHEUS (Ensure this has exactly 2 spaces of indentation)
+  # 📊 PROMETHEUS
   prometheus:
     image: prom/prometheus:v2.45.0
     container_name: vaultpay-prometheus
@@ -61,7 +66,7 @@ services:
     depends_on:
       - vaultpay-api
 
-  # 📉 GRAFANA (Ensure this has exactly 2 spaces of indentation)
+  # 📉 GRAFANA
   grafana:
     image: grafana/grafana:10.2.0
     container_name: vaultpay-grafana
@@ -72,6 +77,20 @@ services:
     depends_on:
       - prometheus
 
-# Global storage volumes (Must be all the way to the left border)
+  # 📑 SWAGGER UI DOCUMENTATION GATEWAY
+  # 📑 SWAGGER UI DOCUMENTATION GATEWAY
+  vaultpay-docs:
+    image: swaggerapi/swagger-ui:v5.11.0
+    container_name: vaultpay-swagger-gateway
+    ports:
+      - "8081:8080"
+    environment:
+      SWAGGER_JSON: /swagger.yml
+    volumes:
+      - ./docs/swagger.yml:/swagger.yml
+    depends_on:
+      - vaultpay-api
+
+# Global storage volumes
 volumes:
   pgdata:

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vaultpay-config
+  namespace: default
+data:
+  DB_HOST: "postgres-service"
+  DB_PORT: "5432"
+  DB_NAME: "vaultpay"
+  DB_USER: "vault_admin"   # <-- ADD THIS LINE CLEANLY
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  PORT: "8080"

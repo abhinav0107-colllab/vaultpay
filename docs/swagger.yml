@@ -1,0 +1,97 @@
+openapi: 3.0.3
+info:
+  title: VaultPay Core Engine API
+  version: 1.0.0
+  description: High-throughput, distributed financial ledger engine with built-in telemetry and event sourcing audit gates.
+servers:
+  - url: http://localhost:8080
+    description: Local Go Application Development Container Gateway
+paths:
+  /v1/charges:
+    post:
+      summary: Process an Idempotent Payment Charge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: integer
+                  example: 5000
+                currency:
+                  type: string
+                  example: "INR"
+      responses:
+        '200':
+          description: Charge captured successfully.
+
+  /v1/subscriptions:
+    post:
+      summary: Provision Recurring Subscription Billing Profiles
+      responses:
+        '201':
+          description: Subscription billing matrix authorized.
+
+  /v1/disputes:
+    post:
+      summary: Initiate an Immutable Payment Chargeback Dispute Case
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - payment_id
+                - reason
+              properties:
+                payment_id:
+                  type: string
+                  example: "ch_test_99"
+                reason:
+                  type: string
+                  example: "fraudulent_transaction_unauthorized_claim"
+      responses:
+        '201':
+          description: Dispute case mounted successfully. Payment funds locked.
+
+  /v1/auth/token:
+    post:
+      summary: Generate Asymmetric RS256 Bearer Token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - client_id
+                - client_secret
+              properties:
+                client_id:
+                  type: string
+                  example: "vaultpay_partner_node_1"
+                client_secret:
+                  type: string
+                  example: "super_secret_client_signature"
+      responses:
+        '200':
+          description: Cryptographic Access Token successfully signed.
+
+  /v1/auth/revoke:
+    post:
+      summary: Statefully Revoke and Blacklist Bearer Token via Redis
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          description: Access token prefixed with Bearer (e.g. 'Bearer <your_token>')
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Token signed-out and marked invalid mid-cycle.
+        '400':
+          description: Bad Request due to missing or malformed header.

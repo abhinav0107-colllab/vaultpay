@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vaultpay-api-deployment
+  labels:
+    app: vaultpay-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vaultpay-api
+  template:
+    metadata:
+      labels:
+        app: vaultpay-api
+    spec:
+      containers:
+        - name: vaultpay-api
+          # Uses your local Docker image built in Phase 1
+          image: vaultpay-api:latest
+          imagePullPolicy: Never # Forces Minikube to look at your local machine image registry
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: vaultpay-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: vaultpay-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: vaultpay-config
+                  key: DB_NAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vaultpay-credentials
+                  key: DB_PASSWORD
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: vaultpay-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: vaultpay-config
+                  key: REDIS_PORT
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: vaultpay-config
+                  key: PORT
+          # HERE IS THE MAGIC: Projecting our crypto keys secret as physical files inside the pod path!
+          volumeMounts:
+            - name: crypto-volume
+              mountPath: /root/private_key.pem
+              subPath: private_key.pem
+            - name: crypto-volume
+              mountPath: /root/public_key.pem
+              subPath: public_key.pem
+      volumes:
+        - name: crypto-volume
+          secret:
+            secretName: vaultpay-crypto-certs
