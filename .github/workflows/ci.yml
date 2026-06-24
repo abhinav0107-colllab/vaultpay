@@ -28,16 +28,17 @@ jobs:
           go-version: '1.22'
           cache: true
 
-      - name: Install Project Dependencies
-        run: go mod download
+      # 🔓 DECODE CRYPTOGRAPHIC KEYS ON THE FLY
+      - name: Inject Decoded Asymmetric Keys for Testing
+        run: |
+          echo "${{ secrets.BASE64_PRIVATE_KEY }}" | base64 --decode > private_key.pem
+          echo "${{ secrets.BASE64_PUBLIC_KEY }}" | base64 --decode > public_key.pem
 
       - name: Run Native Code Verification (Typecheck & Vet)
-        # This acts as our strict linter, catching syntax errors and missing imports instantly
-        run: go vet ./...
+        run: go vet -mod=vendor ./...
 
       - name: Execute Test Suite with Data Race Detection
-        # 🔥 Enforces Day 20 concurrent thread safety milestones in the cloud
-        run: go test -v -race ./...
+        run: go test -mod=vendor -v -race ./...
         env:
           REDIS_HOST: localhost
           REDIS_PORT: 6379
