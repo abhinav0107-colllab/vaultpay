@@ -27,7 +27,7 @@ type SubscriptionRequest struct {
 func (h *SubscriptionHandler) CreateSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
 	var req SubscriptionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Malformed request payload", http.StatusBadRequest)
+		WriteProblemResponse(w, r.URL.Path, http.StatusBadRequest, "Malformed Request Payload", "The JSON syntax provided in the request body is invalid or cannot be parsed.")
 		return
 	}
 
@@ -38,7 +38,7 @@ func (h *SubscriptionHandler) CreateSubscriptionHandler(w http.ResponseWriter, r
 
 	sub, err := h.subService.CreateSubscription(subID, req.UserID, req.PlanID, req.Amount, req.BillingPeriod)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		WriteProblemResponse(w, r.URL.Path, http.StatusUnprocessableEntity, "Subscription Processing Failed", err.Error())
 		return
 	}
 

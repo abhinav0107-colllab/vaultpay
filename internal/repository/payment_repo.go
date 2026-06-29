@@ -144,3 +144,53 @@ func (r *PaymentRepository) UpdatePaymentStatus(ctx context.Context, paymentID s
 	_, err := r.db.ExecContext(ctx, query, nextStatus, paymentID)
 	return err
 }
+
+// GetPaginatedTransactions fetches records using high-performance cursor-based pagination
+func (r *PaymentRepository) GetPaginatedTransactions(ctx context.Context, q TransactionQuery) ([]Transaction, string, error) {
+	// 1. Base query structure sorting chronologically backwards (newest first)
+	query := `
+		SELECT id::text, amount, currency, status, created_at 
+		FROM payments 
+		%s 
+		ORDER BY id DESC 
+		LIMIT $1`
+
+	var rows *sql.Rows
+	var err error
+
+	// 2. Dynamically apply the cursor filter pointer if it exists
+	if q.NextCursor != "" {
+		// Since payments uses UUID/Serial IDs, we use standard string matching evaluation
+		filterClause := "WHERE id::text < $2"
+		sqlQuery := fmt.Sprintf(query, filterClause)
+		rows, err = r.db.QueryContext(ctx, sqlQuery, q.Limit, q.NextCursor)
+	} else {
+		sqlQuery := fmt.Sprintf(query, "")
+		rows, err = r.db.QueryContext(ctx, sqlQuery, q.Limit)
+	}
+
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+
+	var transactions []Transaction
+	var lastID string
+
+	for rows.Next() {
+		var t Transaction
+		if err := rows.Scan(&t.ID, &t.Amount, &t.Currency, &t.Status, &t.CreatedAt); err != nil {
+			return nil, "", err
+		}
+		transactions = append(transactions, t)
+		lastID = t.ID
+	}
+
+	// 3. If we hit our full page limit capacity, pass back the last item's ID as the next page pointer
+	nextPageCursor := ""
+	if len(transactions) == q.Limit {
+		nextPageCursor = lastID
+	}
+
+	return transactions, nextPageCursor, nil
+}

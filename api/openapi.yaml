@@ -1,0 +1,98 @@
+openapi: 3.0.3
+info:
+  title: VaultPay Core API Gateway
+  description: High-performance core ledger, subscription billing engine, and financial transaction processing infrastructure.
+  version: 1.0.0
+servers:
+  - url: https://api.vaultpay.com/v1
+    description: Production Environment Gateway
+  - url: http://localhost:8080/v1
+    description: Local Sandbox Development Environment
+
+paths:
+  /subscriptions:
+    post:
+      summary: Initiate a recurring billing merchant subscription plan
+      operationId: createSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+                - plan_id
+                - amount
+                - billing_period
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+                  example: "4ba3e5b1-2907-4df8-9d9f-11c8dad6529a"
+                plan_id:
+                  type: string
+                  example: "plan_premium_monthly"
+                amount:
+                  type: integer
+                  format: int64
+                  description: Amount denominated in the smallest currency unit (e.g., cents)
+                  example: 2999
+                billing_period:
+                  type: string
+                  enum: [monthly, yearly]
+                  example: "monthly"
+      responses:
+        '201':
+          description: Subscription activated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    example: "active"
+        '400':
+          description: Invalid syntax or malformed payload schema
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: Business logic execution or balance restriction variance validation failure
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+components:
+  schemas:
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - instance
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://vaultpay.com/errors/unprocessable-entity"
+        title:
+          type: string
+          example: "Subscription Processing Failed"
+        status:
+          type: integer
+          example: 422
+        detail:
+          type: string
+          example: "The requested subscription amount does not match the baseline plan price tier configuration setup."
+        instance:
+          type: string
+          example: "/v1/subscriptions"
