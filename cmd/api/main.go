@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log"
-	"net/http"
+	"net/http"x``
 	"os"
 	"time"
 
@@ -197,6 +197,8 @@ func main() {
 		r.Post("/refunds", paymentHand.CreateRefundHandler)
 		r.Post("/subscriptions", subHand.CreateSubscriptionHandler)
 		r.Post("/disputes", disputeHand.CreateDisputeHandler)
+		r.Use(handler.CORSSecurityMiddleware) // Enforces CORS filters first
+		r.Use(handler.RateLimitMiddleware)    // Then enforces the Token Bucket rate limit
 
 		// Day 23 Event Sourcing Audit History Track mapping
 		r.Get("/payments/{id}/history", func(w http.ResponseWriter, r *http.Request) {
@@ -218,19 +220,21 @@ func main() {
 	} else {
 		log.Println("✅ Production Test Merchant 'merchant_india@gmail.com' successfully seeded into PostgreSQL!")
 	}
+	protectedHandler := handler.RateLimitMiddleware(r)
+	securePipeline := handler.CORSSecurityMiddleware(protectedHandler)
 
 	// 8. Fire up the actual HTTP web server listener
-	log.Println("🚀 VAULTPAY INTERNET GATEWAY IS ONLINE & ACTIVE ON PORT :8080")
+	log.Println("VaultPay API Engine Gateway launching on port :8080...")
 	server := &http.Server{
 		Addr:         ":8080",
 		Handler:      r,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
-
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatalf("CRITICAL: Network gateway engine failure: %v", err)
-	}
+err := http.ListenAndServe(":8080", securePipeline)
+if err != nil {
+    log.Fatalf("Critical boot pipeline crash: %v", err)
+}
 }
 
 // Place this at the absolute bottom of the file (outside of any other functions)
