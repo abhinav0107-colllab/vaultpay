@@ -17,8 +17,13 @@ FROM alpine:3.19 AS runner
 WORKDIR /app
 RUN apk add --no-cache ca-certificates
 
-# Copy the binary and migrations directory from the builder workspace
+# Copy the binary and migrations directory
 COPY --from=builder /app/vaultpay-api .
 COPY --from=builder /app/migrations ./migrations
+
+# 👇 ADD THESE TWO LINES TO COPY YOUR CRYPTO KEYS:
+COPY --from=builder /app/private_key.pem .
+COPY --from=builder /app/public_key.pem .
+
 EXPOSE 8080
 CMD ["./vaultpay-api"]
