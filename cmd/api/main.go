@@ -225,12 +225,6 @@ func main() {
 
 	// 8. Fire up the actual HTTP web server listener
 	log.Println("VaultPay API Engine Gateway launching on port :8080...")
-	server := &http.Server{
-		Addr:         ":8080",
-		Handler:      r,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-	}
 err := http.ListenAndServe(":8080", securePipeline)
 if err != nil {
     log.Fatalf("Critical boot pipeline crash: %v", err)
