@@ -10,18 +10,16 @@ COPY . .
 
 # ... lines 1 to 10 remain exactly the same ...
 
+# ... lines 1 to 12 stay exactly the same ...
+
+FROM alpine:3.19 AS runner
 WORKDIR /app
+RUN apk add --no-cache ca-certificates
 
-COPY go.mod go.sum ./
-RUN go mod download
+COPY --from=builder /app/vaultpay-api .
 
-COPY . .
-
-# 👇 ADD THIS LINE RIGHT HERE:
-COPY migrations/ ./migrations/
-
-RUN go build -o main ./cmd/api
+# 👇 ADD THIS EXACT LINE RIGHT HERE:
+COPY --from=builder /app/migrations ./migrations
 
 EXPOSE 8080
-
-CMD ["./main"]
+CMD ["./vaultpay-api"]
