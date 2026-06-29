@@ -153,8 +153,12 @@ func main() {
 	r.Use(middleware.Recoverer)
 
 	// INITIALIZE REDIS ASYNQ BACKGROUND WORKER
+	// INITIALIZE REDIS ASYNQ BACKGROUND WORKER
 	asynqServer := asynq.NewServer(
-		asynq.RedisClientOpt{Addr: "redis:6379"},
+		asynq.RedisClientOpt{
+			Addr:     cfg.RedisHost + ":" + cfg.RedisPort,
+			Password: os.Getenv("REDIS_PASSWORD"), // 🔥 Pass the direct environment password
+		},
 		asynq.Config{
 			Concurrency: 5,
 			Queues: map[string]int{
