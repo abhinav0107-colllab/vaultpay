@@ -169,6 +169,8 @@ func main() {
 	)
 
 	advancedWorker := service.NewAdvancedWebhookWorker(db, paymentRepo)
+	subService := service.NewSubscriptionService()
+	subHandler := handler.NewSubscriptionHandler(subService)
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeWebhookRetryEvent, advancedWorker.ProcessWebhookTask)
 
@@ -182,6 +184,7 @@ func main() {
 	r.Handle("/metrics", promhttp.Handler())
 	// 👇 ADD THIS EXACT LINE RIGHT BELOW IT:
 	r.HandleFunc("/v1/healthcheck", healthcheckHandler)
+	r.HandleFunc("POST /v1/subscriptions", subHandler.CreateSubscriptionHandler)
 
 	// 7. Map REST API Endpoint Resource Routes
 	r.Route("/v1", func(r chi.Router) {
