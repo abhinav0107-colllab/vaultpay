@@ -8,11 +8,20 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/vaultpay-api ./cmd/api/main.go
+# ... lines 1 to 10 remain exactly the same ...
 
-FROM alpine:3.19 AS runner
 WORKDIR /app
-RUN apk add --no-cache ca-certificates
-COPY --from=builder /app/vaultpay-api .
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# 👇 ADD THIS LINE RIGHT HERE:
+COPY migrations/ ./migrations/
+
+RUN go build -o main ./cmd/api
+
 EXPOSE 8080
-CMD ["./vaultpay-api"]      
+
+CMD ["./main"]
