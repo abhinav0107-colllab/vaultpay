@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -77,10 +78,12 @@ func main() {
 
 	// 4. Establish Redis Connection
 	log.Println("Connecting to Redis Cache Layer...")
+	// 4. Establish Redis Connection
+	log.Println("Connecting to Redis Cache Layer...")
 	rdb := redis.NewClient(&redis.Options{
-		Addr: cfg.RedisHost + ":" + cfg.RedisPort,
+		Addr:     cfg.RedisHost + ":" + cfg.RedisPort,
+		Password: os.Getenv("REDIS_PASSWORD"), // 🔥 FORCE it to read the raw variable directly!
 	})
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
