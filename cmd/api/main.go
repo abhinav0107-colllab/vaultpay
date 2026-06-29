@@ -180,6 +180,8 @@ func main() {
 
 	// EXPOSE OPEN PROMETHEUS METRICS SCRAPE ENDPOINT
 	r.Handle("/metrics", promhttp.Handler())
+	// 👇 ADD THIS EXACT LINE RIGHT BELOW IT:
+	r.HandleFunc("/v1/healthcheck", healthcheckHandler)
 
 	// 7. Map REST API Endpoint Resource Routes
 	r.Route("/v1", func(r chi.Router) {
@@ -226,4 +228,17 @@ func main() {
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("CRITICAL: Network gateway engine failure: %v", err)
 	}
+}
+
+// Place this at the absolute bottom of the file (outside of any other functions)
+func healthcheckHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{
+		"status": "available",
+		"system_info": {
+			"environment": "production",
+			"version": "1.0.0"
+		}
+	}`))
 }
