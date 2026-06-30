@@ -29,17 +29,23 @@ func NewPaymentRepository(db *sql.DB) *PaymentRepository {
 
 // CreateTransactionRecord applies an atomic database ledger change safely
 func (r *PaymentRepository) CreateTransactionRecord(ctx context.Context, userID string, amount int64, currency string) (*Payment, error) {
-	// 1. Open a safe SQL Transaction isolation block
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open ledger transaction: %w", err)
+	// 1. Configure the transaction options to enforce strict Serializable Isolation
+	txOpts := &sql.TxOptions{
+		Isolation: sql.LevelSerializable,
+		ReadOnly:  false,
 	}
 
-	// Rule: Defer a rollback. If the function exits early due to an error,
-	// any partial database state adjustments are completely wiped clean.
+	// 2. Open the highly secure, isolated database transaction block
+	tx, err := r.db.BeginTx(ctx, txOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open secure serializable transaction: %w", err)
+	}
+
+	// Rule: Defer a safe rollback. If the function exits early due to an error,
+	// any partial database adjustments are completely wiped clean.
 	defer tx.Rollback()
 
-	// 2. Fetch current balance and lock the row for update to prevent concurrent race conditions
+	// 3. Fetch current balance and lock the row for update to prevent concurrent race conditions
 	var currentBalance int64
 	balanceQuery := `SELECT balance FROM users WHERE id = $1 FOR UPDATE`
 	err = tx.QueryRowContext(ctx, balanceQuery, userID).Scan(&currentBalance)
@@ -47,32 +53,33 @@ func (r *PaymentRepository) CreateTransactionRecord(ctx context.Context, userID 
 		return nil, fmt.Errorf("failed to look up target user balance: %w", err)
 	}
 
-	// 3. Prevent overdraft limits
+	// 4. Prevent overdraft limits
 	if currentBalance < amount {
 		return nil, fmt.Errorf("insufficient account balances to clear transaction")
 	}
 
-	// 4. Update user account balance
+	// 5. Update user account balance safely
 	updateUserQuery := `UPDATE users SET balance = balance - $1 WHERE id = $2`
 	_, err = tx.ExecContext(ctx, updateUserQuery, amount, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to adjust user ledger balance accounts: %w", err)
 	}
 
-	// 5. Insert audit log tracking record into payments
+	// 6. Insert audit log tracking record into payments
 	insertPaymentQuery := `
 		INSERT INTO payments (user_id, amount, currency, status)
 		VALUES ($1, $2, $3, 'COMPLETED')
 		RETURNING id, user_id, amount, currency, status, created_at`
 
 	p := &Payment{}
-	err = tx.QueryRowContext(ctx, insertPaymentQuery, userID, amount, currency).
-		Scan(&p.ID, &p.UserID, &p.Amount, &p.Currency, &p.Status, &p.CreatedAt)
+	err = tx.QueryRowContext(ctx, insertPaymentQuery, userID, amount, currency).Scan(
+		&p.ID, &p.UserID, &p.Amount, &p.Currency, &p.Status, &p.CreatedAt,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to register permanent payment record log: %w", err)
 	}
 
-	// 6. Commit transaction safely to the database disk
+	// 7. Commit transaction safely to the database disk
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit financial block adjustments: %w", err)
 	}
