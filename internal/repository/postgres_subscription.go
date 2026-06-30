@@ -62,7 +62,7 @@ func (r *PostgresSubscriptionRepository) Update(ctx context.Context, sub *Subscr
 	return err
 }
 
-type Subscription struct {
+type PostgresSubscription struct {
 	ID                 string    `json:"id"`
 	MerchantID         string    `json:"merchant_id"`
 	PlanName           string    `json:"plan_name"`

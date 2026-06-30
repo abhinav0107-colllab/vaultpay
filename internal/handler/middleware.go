@@ -37,8 +37,7 @@ func init() {
 
 // RateLimitMiddleware enforces a strict quota of 5 requests per second with a burst allowance of 10
 func RateLimitMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(w http.ResponseWriter, r *http.Request) {
-		// Extract user IP address safely
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // Extract user IP address safely
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
 			WriteProblemResponse(w, r.URL.Path, http.StatusBadRequest, "Invalid Remote Address", "Could not evaluate client origin IP pointer mappings.")
@@ -61,12 +60,12 @@ func RateLimitMiddleware(next http.Handler) http.Handler {
 		mu.Unlock()
 
 		next.ServeHTTP(w, r)
-	}
+	})
 }
 
 // CORSSecurityMiddleware ensures secure, authorized cross-origin requests from frontend apps
 func CORSSecurityMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*") // Adjust to specific frontend domains in production
 		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -78,5 +77,5 @@ func CORSSecurityMiddleware(next http.Handler) http.Handler {
 		}
 
 		next.ServeHTTP(w, r)
-	}
+	})
 }

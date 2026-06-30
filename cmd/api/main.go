@@ -197,8 +197,9 @@ func main() {
 		r.Post("/refunds", paymentHand.CreateRefundHandler)
 		r.Post("/subscriptions", subHand.CreateSubscriptionHandler)
 		r.Post("/disputes", disputeHand.CreateDisputeHandler)
-		r.Use(handler.CORSSecurityMiddleware) // Enforces CORS filters first
-		r.Use(handler.RateLimitMiddleware)    // Then enforces the Token Bucket rate limit
+		// Then enforces the Token Bucket rate limit
+		r.Use(handler.CORSSecurityMiddleware)
+		r.Use(handler.RateLimitMiddleware)
 
 		// Day 23 Event Sourcing Audit History Track mapping
 		r.Get("/payments/{id}/history", func(w http.ResponseWriter, r *http.Request) {
@@ -220,12 +221,11 @@ func main() {
 	} else {
 		log.Println("✅ Production Test Merchant 'merchant_india@gmail.com' successfully seeded into PostgreSQL!")
 	}
-	protectedHandler := handler.RateLimitMiddleware(r)
-	securePipeline := handler.CORSSecurityMiddleware(protectedHandler)
 
 	// 8. Fire up the actual HTTP web server listener
+	// 8. Fire up the actual HTTP web server listener
 	log.Println("VaultPay API Engine Gateway launching on port :8080...")
-	err := http.ListenAndServe(":8080", securePipeline)
+	err = http.ListenAndServe(":8080", r)
 	if err != nil {
 		log.Fatalf("Critical boot pipeline crash: %v", err)
 	}
