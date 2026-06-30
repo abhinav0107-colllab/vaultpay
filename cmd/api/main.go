@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log"
-	"net/http"x``
+	"net/http"
 	"os"
 	"time"
 
@@ -225,10 +225,10 @@ func main() {
 
 	// 8. Fire up the actual HTTP web server listener
 	log.Println("VaultPay API Engine Gateway launching on port :8080...")
-err := http.ListenAndServe(":8080", securePipeline)
-if err != nil {
-    log.Fatalf("Critical boot pipeline crash: %v", err)
-}
+	err := http.ListenAndServe(":8080", securePipeline)
+	if err != nil {
+		log.Fatalf("Critical boot pipeline crash: %v", err)
+	}
 }
 
 // Place this at the absolute bottom of the file (outside of any other functions)
