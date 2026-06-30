@@ -106,7 +106,6 @@ func main() {
 	// 2. Initialize Core Domain Business Services
 	authServ := service.NewAuthService(keyRepo)
 	paymentServ := service.NewPaymentService(paymentRepo)
-	subServ := service.NewSubscriptionService()
 	disputeServ := service.NewDisputeService()
 
 	jwtServ, err := service.NewJWTAuthService(rdb, "private_key.pem", "public_key.pem")
@@ -117,7 +116,11 @@ func main() {
 	// 3. Initialize REST Presentation Handlers
 	authHand := handler.NewAuthHandler(authServ)
 	paymentHand := handler.NewPaymentHandler(paymentServ)
-	subHand := handler.NewSubscriptionHandler(subServ)
+
+	// Create the service FIRST, then pass it into the handler
+	subService := service.NewSubscriptionService()
+	subHand := handler.NewSubscriptionHandler(subService) // 💡 Changed from subServ to subService
+
 	disputeHand := handler.NewDisputeHandler(disputeServ)
 	jwtHand := handler.NewJWTAuthHandler(jwtServ)
 
@@ -169,8 +172,8 @@ func main() {
 	)
 
 	advancedWorker := service.NewAdvancedWebhookWorker(db, paymentRepo)
-	subService := service.NewSubscriptionService()
-	subHandler := handler.NewSubscriptionHandler(subService)
+	// 💡 The old subService line was deleted from here!
+	subHandler := handler.NewSubscriptionHandler(subService) // 💡 Ensure this points to subService
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeWebhookRetryEvent, advancedWorker.ProcessWebhookTask)
 

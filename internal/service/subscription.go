@@ -22,18 +22,27 @@ type Subscription struct {
 	CurrentPeriodEnd   time.Time `json:"current_period_end"`
 }
 
-type SubscriptionService struct {
+type SubscriptionServiceImpl struct {
 	// 🔥 DAY 22 TECH GAIN: Use sync.Map for high-concurrency, thread-safe memory state lookups
 	store     sync.Map
 	onceCheck sync.Once // Core pattern initialization gate
 }
 
-func NewSubscriptionService() *SubscriptionService {
-	return &SubscriptionService{}
+// Return the interface, but instantiate the concrete implementation struct
+func NewSubscriptionService() SubscriptionService {
+	return &SubscriptionServiceImpl{}
+}
+
+// 1. Updated interface to include BOTH methods
+type SubscriptionService interface {
+	// Change the first return type from *Subscription to interface{}
+	CreateSubscription(id, userID, planID string, amount int64, period string) (interface{}, error)
+	CalculateProration(subID string, newAmount int64) (int64, error)
 }
 
 // CreateSubscription maps out a brand new recurring transaction schedule
-func (s *SubscriptionService) CreateSubscription(id, userID, planID string, amount int64, period string) (*Subscription, error) {
+// 2. CHANGED RECEIVER TO: *SubscriptionServiceImpl AND RETURN TYPE TO: (interface{}, error)
+func (s *SubscriptionServiceImpl) CreateSubscription(id, userID, planID string, amount int64, period string) (interface{}, error) {
 	if period != "monthly" && period != "annual" {
 		return nil, ErrInvalidBillingPeriod
 	}
@@ -63,14 +72,17 @@ func (s *SubscriptionService) CreateSubscription(id, userID, planID string, amou
 
 // CalculateProration computes the remaining cash value credit of an existing tier
 // and maps out the cost adjustments required to scale up to an alternative plan level.
-func (s *SubscriptionService) CalculateProration(subID string, newAmount int64) (int64, error) {
+// 3. CHANGED RECEIVER TO: *SubscriptionServiceImpl
+func (s *SubscriptionServiceImpl) CalculateProration(subID string, newAmount int64) (int64, error) {
 	value, exists := s.store.Load(subID)
 	if !exists {
 		return 0, ErrSubscriptionNotFound
 	}
+
 	sub := value.(*Subscription)
 
 	now := time.Now()
+	// ... leave the rest of your calculation code exactly as it is below this ...
 	totalDuration := sub.CurrentPeriodEnd.Sub(sub.CurrentPeriodStart)
 	remainingDuration := sub.CurrentPeriodEnd.Sub(now)
 
