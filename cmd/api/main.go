@@ -85,10 +85,13 @@ func main() {
 	log.Println("Configuring routing architecture and middleware pipelines...")
 
 	// 1. Initialize All Infrastructure Repositories
-	userRepo := repository.NewUserRepository(dbCluster.Master)
-	keyRepo := repository.NewKeyRepository(dbCluster.Master)
-	paymentRepo := repository.NewPaymentRepository(dbCluster.Master)
-	auditRepo := repository.NewAuditRepository(dbCluster.Replica)
+	// 1. Initialize All Infrastructure Repositories
+	userRepo := repository.NewUserRepository(dbCluster.Master) // Keep as is if not yet refactored
+	keyRepo := repository.NewKeyRepository(dbCluster.Master)   // Keep as is if not yet refactored
+
+	// Pass the whole cluster instance here:
+	paymentRepo := repository.NewPaymentRepository(dbCluster) // ◄ Removed .Master
+	auditRepo := repository.NewAuditRepository(dbCluster)     // ◄ Removed .Replica (if refactored similarly)
 
 	// 2. Initialize Core Domain Business Services
 	authServ := service.NewAuthService(keyRepo)

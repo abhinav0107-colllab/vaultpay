@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/abhinav0107-collab/vaultpay/internal/database"
 )
 
 type PaymentStatus string
@@ -18,13 +20,15 @@ type Payment struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"` // <-- ADD THIS LINE
 }
-
 type PaymentRepository struct {
-	db *sql.DB
+	cluster *database.DatabaseCluster // ◄ Changed from db *sql.DB
 }
 
-func NewPaymentRepository(db *sql.DB) *PaymentRepository {
-	return &PaymentRepository{db: db}
+// Update your constructor function right below it to match:
+func NewPaymentRepository(cluster *database.DatabaseCluster) *PaymentRepository {
+	return &PaymentRepository{
+		cluster: cluster,
+	}
 }
 
 // CreateTransactionRecord applies an atomic database ledger change safely
@@ -36,7 +40,7 @@ func (r *PaymentRepository) CreateTransactionRecord(ctx context.Context, userID 
 	}
 
 	// 2. Open the highly secure, isolated database transaction block
-	tx, err := r.db.BeginTx(ctx, txOpts)
+	tx, err := r.cluster.Master.BeginTx(ctx, txOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open secure serializable transaction: %w", err)
 	}
@@ -92,7 +96,8 @@ func (r *PaymentRepository) RefundTransactionRecord(ctx context.Context, payment
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	// Swapped r.db with r.cluster.Master
+	tx, err := r.cluster.Master.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open refund transaction: %w", err)
 	}
@@ -148,7 +153,8 @@ func (r *PaymentRepository) UpdatePaymentStatus(ctx context.Context, paymentID s
 		SET status = $1, updated_at = NOW() 
 		WHERE id = $2`
 
-	_, err := r.db.ExecContext(ctx, query, nextStatus, paymentID)
+	// Line 156 update: Change r.db to r.cluster.Master
+	_, err := r.cluster.Master.ExecContext(ctx, query, nextStatus, paymentID)
 	return err
 }
 
@@ -170,10 +176,12 @@ func (r *PaymentRepository) GetPaginatedTransactions(ctx context.Context, q Tran
 		// Since payments uses UUID/Serial IDs, we use standard string matching evaluation
 		filterClause := "WHERE id::text < $2"
 		sqlQuery := fmt.Sprintf(query, filterClause)
-		rows, err = r.db.QueryContext(ctx, sqlQuery, q.Limit, q.NextCursor)
+		// ◄ Route to Replica!
+		rows, err = r.cluster.Replica.QueryContext(ctx, sqlQuery, q.Limit, q.NextCursor)
 	} else {
 		sqlQuery := fmt.Sprintf(query, "")
-		rows, err = r.db.QueryContext(ctx, sqlQuery, q.Limit)
+		// ◄ Route to Replica!
+		rows, err = r.cluster.Replica.QueryContext(ctx, sqlQuery, q.Limit)
 	}
 
 	if err != nil {

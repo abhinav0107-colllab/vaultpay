@@ -1,9 +1,10 @@
 package repository
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
+
+	"github.com/abhinav0107-collab/vaultpay/internal/database"
 )
 
 type PaymentEvent struct {
@@ -15,11 +16,13 @@ type PaymentEvent struct {
 }
 
 type AuditRepository struct {
-	db *sql.DB
+	cluster *database.DatabaseCluster // ◄ Changed from *sql.DB
 }
 
-func NewAuditRepository(db *sql.DB) *AuditRepository {
-	return &AuditRepository{db: db}
+func NewAuditRepository(cluster *database.DatabaseCluster) *AuditRepository {
+	return &AuditRepository{
+		cluster: cluster,
+	}
 }
 
 // LogEvent appends a new immutable state transition record into our audit ledger
@@ -30,7 +33,9 @@ func (r *AuditRepository) LogEvent(paymentID, eventType string, payloadData inte
 	}
 
 	query := `INSERT INTO payment_events (payment_id, event_type, payload) VALUES ($1, $2, $3)`
-	_, err = r.db.Exec(query, paymentID, eventType, jsonPayload)
+
+	// ◄ Route mutation writes to the Master Node pool
+	_, err = r.cluster.Master.Exec(query, paymentID, eventType, jsonPayload)
 	return err
 }
 
@@ -42,7 +47,8 @@ func (r *AuditRepository) ReplayHistory(paymentID string) ([]PaymentEvent, error
 		WHERE payment_id = $1 
 		ORDER BY id ASC`
 
-	rows, err := r.db.Query(query, paymentID)
+	// ◄ Offload read queries to the Replica Node pool
+	rows, err := r.cluster.Replica.Query(query, paymentID)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +85,8 @@ func (r *AuditRepository) AnalyzeTransitions(paymentID string) ([]StateTransitio
 		FROM payment_events
 		WHERE payment_id = $1`
 
-	rows, err := r.db.Query(query, paymentID)
+	// ◄ Offload heavy window processing queries to the Replica Node pool
+	rows, err := r.cluster.Replica.Query(query, paymentID)
 	if err != nil {
 		return nil, err
 	}
