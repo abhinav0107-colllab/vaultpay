@@ -18,3 +18,7 @@
 {"level":"info","timestamp":"2026-07-06T22:22:00.250+0530","caller":"api/main.go:60","msg":"Database Cluster Status: MASTER (Connected) | REPLICA (Connected)"}
 {"level":"info","timestamp":"2026-07-06T22:56:20.380+0530","caller":"api/main.go:51","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
 {"level":"info","timestamp":"2026-07-06T22:56:20.579+0530","caller":"api/main.go:60","msg":"Database Cluster Status: MASTER (Connected) | REPLICA (Connected)"}
+{"level":"info","timestamp":"2026-07-06T22:57:14.088+0530","caller":"api/main.go:51","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
+{"level":"info","timestamp":"2026-07-06T22:57:14.290+0530","caller":"api/main.go:60","msg":"Database Cluster Status: MASTER (Connected) | REPLICA (Connected)"}
+{"level":"info","timestamp":"2026-07-06T23:08:00.026+0530","caller":"api/main.go:53","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
+{"level":"info","timestamp":"2026-07-06T23:08:00.210+0530","caller":"api/main.go:61","msg":"Database Cluster Status: MASTER (Connected) | REPLICA (Connected)"}

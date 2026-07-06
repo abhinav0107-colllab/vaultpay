@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -54,8 +56,7 @@ func main() {
 	if err != nil {
 		logger.Log.Fatal("Critical boot failure: Database Cluster unreachable", zap.Error(err))
 	}
-	defer dbCluster.Master.Close()
-	defer dbCluster.Replica.Close()
+	// REMOVED early defers here so connection lifecycle is managed completely inside our shutdown engine block
 
 	logger.Log.Info("Database Cluster Status: MASTER (Connected) | REPLICA (Connected)")
 	log.Println("🟢 PostgreSQL Connection: SUCCESSFUL")
@@ -85,13 +86,10 @@ func main() {
 	log.Println("Configuring routing architecture and middleware pipelines...")
 
 	// 1. Initialize All Infrastructure Repositories
-	// 1. Initialize All Infrastructure Repositories
-	userRepo := repository.NewUserRepository(dbCluster.Master) // Keep as is if not yet refactored
-	keyRepo := repository.NewKeyRepository(dbCluster.Master)   // Keep as is if not yet refactored
-
-	// Pass the whole cluster instance here:
-	paymentRepo := repository.NewPaymentRepository(dbCluster) // ◄ Removed .Master
-	auditRepo := repository.NewAuditRepository(dbCluster)     // ◄ Removed .Replica (if refactored similarly)
+	userRepo := repository.NewUserRepository(dbCluster.Master)
+	keyRepo := repository.NewKeyRepository(dbCluster.Master)
+	paymentRepo := repository.NewPaymentRepository(dbCluster)
+	auditRepo := repository.NewAuditRepository(dbCluster)
 
 	// 2. Initialize Core Domain Business Services
 	authServ := service.NewAuthService(keyRepo)
@@ -207,12 +205,66 @@ func main() {
 		log.Println("✅ Production Test Merchant 'merchant_india@gmail.com' successfully seeded into PostgreSQL!")
 	}
 
-	// 8. Fire up the actual HTTP web server listener
-	log.Println("VaultPay API Engine Gateway launching on port :8080...")
-	err = http.ListenAndServe(":8080", r)
-	if err != nil {
-		log.Fatalf("Critical boot pipeline crash: %v", err)
+	// 8. Build HTTP Server Wrapper Configuration
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
 	}
+
+	// Create a buffered channel to capture incoming operational system termination interrupts
+	shutdownSignals := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignals, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+
+	// Launch HTTP Server inside an async goroutine thread loop
+	go func() {
+		log.Println("🚀 VaultPay API Engine Gateway launching on port :8080...")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Critical listen and serve infrastructure failure: %v", err)
+		}
+	}()
+
+	// ========================================================================
+	// 🛑 GRACEFUL SHUTDOWN EXECUTION INTERCEPTOR
+	// ========================================================================
+	sig := <-shutdownSignals
+	log.Printf("⚠️ Intercepted shutdown signal [%v]. Beginning graceful drainage sequence...", sig)
+
+	// Establish a strict 10-second contextual limit for flight operations to wrap up cleanly
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	// 1. Force the server listener to reject any incoming requests while draining existing flights
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP gateway force closure error: %v", err)
+	} else {
+		log.Println("Byebye 🟢 HTTP gateway drained and stopped safely.")
+	}
+
+	// 2. Shutdown Asynq Background Daemon Workers cleanly
+	log.Println("Draining and shutting down async worker queues...")
+	asynqServer.Shutdown()
+	log.Println("🟢 Asynq background daemon engine exited cleanly.")
+
+	// 3. Close Database Cluster Connection Sockets securely
+	log.Println("Closing database cluster connection pools...")
+	if dbCluster != nil {
+		if dbCluster.Master != nil {
+			_ = dbCluster.Master.Close()
+		}
+		if dbCluster.Replica != nil {
+			_ = dbCluster.Replica.Close()
+		}
+		log.Println("🟢 Database connection pools closed cleanly.")
+	}
+
+	// 4. Tear down active Redis caching engine socket links
+	log.Println("Disconnecting Redis cache layers...")
+	if rdb != nil {
+		_ = rdb.Close()
+		log.Println("🟢 Redis client connections destroyed safely.")
+	}
+
+	log.Println("🏁 VaultPay API Engine shutdown sequence complete. Process exiting safely.")
 }
 
 func healthcheckHandler(w http.ResponseWriter, r *http.Request) {
