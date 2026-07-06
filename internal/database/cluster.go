@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/abhinav0107-collab/vaultpay/internal/config"
@@ -11,8 +12,26 @@ import (
 )
 
 type DatabaseCluster struct {
-	Master  *sql.DB
-	Replica *sql.DB
+	Master         *sql.DB
+	Replica        *sql.DB
+	ReplicaBreaker *CircuitBreaker // ◄ Added protective circuit breaker layer
+}
+
+type BreakerState string
+
+const (
+	StateClosed   BreakerState = "CLOSED"    // Normal operations
+	StateOpen     BreakerState = "OPEN"      // Database down, failing fast
+	StateHalfOpen BreakerState = "HALF_OPEN" // Testing database recovery
+)
+
+type CircuitBreaker struct {
+	mu           sync.RWMutex
+	state        BreakerState
+	failureCount int
+	threshold    int
+	cooldown     time.Duration
+	lastStateLog time.Time
 }
 
 // InitCluster initializes connection pools for both writing and reading nodes
@@ -48,6 +67,11 @@ func InitCluster(cfg *config.Config) (*DatabaseCluster, error) {
 	return &DatabaseCluster{
 		Master:  masterPool,
 		Replica: replicaPool,
+		ReplicaBreaker: &CircuitBreaker{
+			state:     StateClosed,
+			threshold: 5,                // Trip open after 5 consecutive failures
+			cooldown:  15 * time.Second, // Let the replica rest for 15s before re-testing
+		},
 	}, nil
 }
 
@@ -58,32 +82,83 @@ func configurePool(db *sql.DB) {
 }
 
 // RetryQuery executes a read-only operation with an exponential backoff strategy for high resiliency
+// RetryQuery executes an operation with both Circuit Breaker protection and Exponential Backoff
 func (c *DatabaseCluster) RetryQuery(ctx context.Context, operation func() error) error {
+	// 1. Check if the breaker allows replica traffic
+	if !c.ReplicaBreaker.CanExecute() {
+		// Fallback Strategy: Instead of crashing, gracefully route the read query to Master!
+		return operation()
+	}
+
 	maxRetries := 3
 	backoff := 100 * time.Millisecond
-
 	var err error
+
 	for i := 0; i < maxRetries; i++ {
-		// Attempt the database read operation
 		if err = operation(); err == nil {
-			return nil // Operation succeeded! Out of the loop we go.
+			c.ReplicaBreaker.RecordSuccess() // ◄ Query succeeded! Clear breaker metrics.
+			return nil
 		}
 
-		// Stop retrying immediately if the context was explicitly canceled or timed out
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		// Fail open or log transient notice here if you want, then wait
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(backoff):
 		}
-
-		// Progressively back off to not overwhelm the replica link (100ms -> 200ms -> 400ms)
 		backoff *= 2
 	}
 
-	return fmt.Errorf("resilient query pipeline collapsed after %d attempts: %w", maxRetries, err)
+	// 2. If the operation consistently fails across retries, trip the circuit breaker
+	c.ReplicaBreaker.RecordFailure()
+	return fmt.Errorf("breaker pipeline intercepted failure: %w", err)
+}
+
+// CanExecute checks the breaker state and determines if the replica can take traffic
+func (cb *CircuitBreaker) CanExecute() bool {
+	cb.mu.RLock()
+	if cb.state == StateClosed {
+		cb.mu.RUnlock()
+		return true
+	}
+	cb.mu.RUnlock()
+
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	// If the circuit is OPEN, check if the cooldown window has expired
+	if cb.state == StateOpen {
+		if time.Since(cb.lastStateLog) > cb.cooldown {
+			cb.state = StateHalfOpen
+			cb.lastStateLog = time.Now()
+			return true
+		}
+		return false // Circuit is still open, fail fast!
+	}
+
+	return true // HALF_OPEN allows a trial request through
+}
+
+// RecordFailure increments errors and trips the breaker if threshold is breached
+func (cb *CircuitBreaker) RecordFailure() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	cb.failureCount++
+	if cb.state == StateHalfOpen || cb.failureCount >= cb.threshold {
+		cb.state = StateOpen
+		cb.lastStateLog = time.Now()
+	}
+}
+
+// RecordSuccess resets the breaker back to a pristine operational state
+func (cb *CircuitBreaker) RecordSuccess() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	cb.state = StateClosed
+	cb.failureCount = 0
 }
