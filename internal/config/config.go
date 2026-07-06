@@ -6,28 +6,30 @@ import (
 )
 
 type Config struct {
-	DBHost     string
-	DBPort     string
-	DBUser     string
-	DBPassword string
-	DBName     string
-	RedisHost  string
-	RedisPort  string
+	DBHost        string
+	DBReplicaHost string // ◄ Added to track our read-only replica connection node
+	DBPort        string
+	DBUser        string
+	DBPassword    string
+	DBName        string
+	RedisHost     string
+	RedisPort     string
 }
 
 // Load reads values from the environment variables set by Docker Compose
+// Load reads values from the environment variables set by Docker Compose
 func Load() (*Config, error) {
 	return &Config{
-		DBHost:     getEnv("DB_HOST", "localhost"),
-		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "vault_admin"),
-		DBPassword: getEnv("DB_PASSWORD", "vault_secure_pass"),
-		DBName:     getEnv("DB_NAME", "vaultpay_db"),
-		RedisHost:  getEnv("REDIS_HOST", "localhost"),
-		RedisPort:  getEnv("REDIS_PORT", "6379"),
+		DBHost:        getEnv("DB_HOST", "localhost"),
+		DBReplicaHost: getEnv("DB_REPLICA_HOST", "localhost"), // ◄ Add this line cleanly here!
+		DBPort:        getEnv("DB_PORT", "5432"),
+		DBUser:        getEnv("DB_USER", "postgres"),
+		DBPassword:    getEnv("DB_PASSWORD", "secretpassword"),
+		DBName:        getEnv("DB_NAME", "vaultpay"),
+		RedisHost:     getEnv("REDIS_HOST", "localhost"),
+		RedisPort:     getEnv("REDIS_PORT", "6379"),
 	}, nil
 }
-
 func getEnv(key, fallback string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value

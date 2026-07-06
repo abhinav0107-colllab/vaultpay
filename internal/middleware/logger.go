@@ -1,18 +1,16 @@
 package middleware
 
 import (
-	"log"
 	"net/http"
 	"time"
 
+	"github.com/abhinav0107-collab/vaultpay/internal/logger" // ◄ Import your new global logger package
 	"github.com/go-chi/chi/v5/middleware"
+	"go.uber.org/zap"
 )
 
-// StructuredLogger intercepts incoming HTTP traffic and logs core execution metrics
-// StructuredLogger intercepts incoming HTTP traffic and logs core execution metrics
 func StructuredLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 🔥 SKIP TELEMETRY LOG SPAM FOR PROMETHEUS SCRAPES
 		if r.URL.Path == "/metrics" {
 			next.ServeHTTP(w, r)
 			return
@@ -21,16 +19,15 @@ func StructuredLogger(next http.Handler) http.Handler {
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		startTime := time.Now()
 
-		// Let the request proceed downstream to our handlers
 		next.ServeHTTP(ww, r)
 
-		// Print clean execution metrics after the request completes
-		log.Printf("[HTTP] METHOD=%s PATH=%s STATUS=%d DURATION=%s REQ_ID=%s",
-			r.Method,
-			r.URL.Path,
-			ww.Status(),
-			time.Since(startTime).String(),
-			middleware.GetReqID(r.Context()),
+		// ◄ Blazing fast production structured logging output!
+		logger.Log.Info("HTTP Request Processed",
+			zap.String("method", r.Method),
+			zap.String("path", r.URL.Path),
+			zap.Int("status", ww.Status()),
+			zap.Duration("duration", time.Since(startTime)),
+			zap.String("req_id", middleware.GetReqID(r.Context())),
 		)
 	})
 }

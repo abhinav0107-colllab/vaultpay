@@ -10,7 +10,13 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.19.0
 	go.opentelemetry.io/otel v1.37.0
+	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.51.0
+)
+
+require (
+	go.uber.org/multierr v1.10.0 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (

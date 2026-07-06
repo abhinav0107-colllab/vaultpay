@@ -1,0 +1,12 @@
+{"level":"info","timestamp":"2026-07-05T15:29:28.871+0530","caller":"api/main.go:51","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
+{"level":"info","timestamp":"2026-07-05T15:29:28.961+0530","caller":"api/main.go:60","msg":"Database Cluster Status: MASTER (Connected) | REPLICA (Connected)"}
+{"level":"info","timestamp":"2026-07-06T14:11:53.805+0530","caller":"api/main.go:51","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
+{"level":"fatal","timestamp":"2026-07-06T14:11:53.836+0530","caller":"api/main.go:55","msg":"Critical boot failure: Database Cluster unreachable","error":"master node unreachable: dial tcp [::1]:5432: connectex: No connection could be made because the target machine actively refused it."}
+{"level":"info","timestamp":"2026-07-06T14:13:51.890+0530","caller":"api/main.go:51","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
+{"level":"fatal","timestamp":"2026-07-06T14:13:51.893+0530","caller":"api/main.go:55","msg":"Critical boot failure: Database Cluster unreachable","error":"master node unreachable: dial tcp 127.0.0.1:5432: connectex: No connection could be made because the target machine actively refused it."}
+{"level":"info","timestamp":"2026-07-06T14:16:52.532+0530","caller":"api/main.go:51","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
+{"level":"fatal","timestamp":"2026-07-06T14:16:52.534+0530","caller":"api/main.go:55","msg":"Critical boot failure: Database Cluster unreachable","error":"master node unreachable: dial tcp 127.0.0.1:5432: connectex: No connection could be made because the target machine actively refused it."}
+{"level":"info","timestamp":"2026-07-06T14:18:35.303+0530","caller":"api/main.go:51","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
+{"level":"info","timestamp":"2026-07-06T14:18:35.335+0530","caller":"api/main.go:60","msg":"Database Cluster Status: MASTER (Connected) | REPLICA (Connected)"}
+{"level":"info","timestamp":"2026-07-06T14:19:16.593+0530","caller":"api/main.go:51","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
+{"level":"info","timestamp":"2026-07-06T14:19:16.623+0530","caller":"api/main.go:60","msg":"Database Cluster Status: MASTER (Connected) | REPLICA (Connected)"}

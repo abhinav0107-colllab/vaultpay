@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -15,6 +14,7 @@ import (
 	"github.com/abhinav0107-collab/vaultpay/internal/config"
 	"github.com/abhinav0107-collab/vaultpay/internal/database"
 	"github.com/abhinav0107-collab/vaultpay/internal/handler"
+	"github.com/abhinav0107-collab/vaultpay/internal/logger"
 	customMW "github.com/abhinav0107-collab/vaultpay/internal/middleware"
 	"github.com/abhinav0107-collab/vaultpay/internal/repository"
 	"github.com/abhinav0107-collab/vaultpay/internal/service"
@@ -25,10 +25,14 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 func main() {
+	logger.InitializeLogger()
+	defer logger.Log.Sync()
 	log.Println("--- VaultPay Initializing ---")
+
 	// EXPOSE PPROF PROFILING GATEWAY
 	go func() {
 		log.Println("⏱️  PPROF PROFILER SERVER LISTENING ON PORT :6060")
@@ -43,46 +47,29 @@ func main() {
 		log.Fatalf("Failed to initialize configuration settings: %v", err)
 	}
 
-	// 2. Establish PostgreSQL Connection Pool
-	var db *sql.DB
-	dsn := cfg.GetDSN()
+	// 2. Establish PostgreSQL Connection Pool (Master & Replica Cluster)
+	logger.Log.Info("Connecting to Database Cluster (Master & Replica Nodes)...")
 
-	for i := 1; i <= 5; i++ {
-		log.Printf("Connecting to PostgreSQL (Attempt %d/5)...", i)
-		db, err = sql.Open("postgres", dsn)
-		if err == nil {
-			err = db.Ping()
-		}
-
-		if err == nil {
-			break
-		}
-		log.Printf("PostgreSQL not ready yet, retrying in 2s: %v", err)
-		time.Sleep(2 * time.Second)
-	}
-
+	dbCluster, err := database.InitCluster(cfg)
 	if err != nil {
-		log.Fatalf("CRITICAL: Failed to connect to PostgreSQL database: %v", err)
+		logger.Log.Fatal("Critical boot failure: Database Cluster unreachable", zap.Error(err))
 	}
-	defer db.Close()
+	defer dbCluster.Master.Close()
+	defer dbCluster.Replica.Close()
+
+	logger.Log.Info("Database Cluster Status: MASTER (Connected) | REPLICA (Connected)")
 	log.Println("🟢 PostgreSQL Connection: SUCCESSFUL")
 
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(25)
-	db.SetConnMaxLifetime(5 * time.Minute)
-
-	// 3. Run Database Migrations Automatically
+	// 3. Run Database Migrations Automatically (Targeting Master)
 	log.Println("Preparing database migrations...")
 	migrationURL := "postgres://" + cfg.DBUser + ":" + cfg.DBPassword + "@" + cfg.DBHost + ":" + cfg.DBPort + "/" + cfg.DBName + "?sslmode=disable"
 	database.RunMigrations(migrationURL)
 
 	// 4. Establish Redis Connection
 	log.Println("Connecting to Redis Cache Layer...")
-	// 4. Establish Redis Connection
-	log.Println("Connecting to Redis Cache Layer...")
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.RedisHost + ":" + cfg.RedisPort,
-		Password: os.Getenv("REDIS_PASSWORD"), // 🔥 FORCE it to read the raw variable directly!
+		Password: os.Getenv("REDIS_PASSWORD"),
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -98,10 +85,10 @@ func main() {
 	log.Println("Configuring routing architecture and middleware pipelines...")
 
 	// 1. Initialize All Infrastructure Repositories
-	userRepo := repository.NewUserRepository(db)
-	keyRepo := repository.NewKeyRepository(db)
-	paymentRepo := repository.NewPaymentRepository(db)
-	auditRepo := repository.NewAuditRepository(db)
+	userRepo := repository.NewUserRepository(dbCluster.Master)
+	keyRepo := repository.NewKeyRepository(dbCluster.Master)
+	paymentRepo := repository.NewPaymentRepository(dbCluster.Master)
+	auditRepo := repository.NewAuditRepository(dbCluster.Replica)
 
 	// 2. Initialize Core Domain Business Services
 	authServ := service.NewAuthService(keyRepo)
@@ -110,17 +97,14 @@ func main() {
 
 	jwtServ, err := service.NewJWTAuthService(rdb, "private_key.pem", "public_key.pem")
 	if err != nil {
-		log.Fatalf("CRITICAL: Failed to seed RSA Cryptographic Keys: %v", err)
+		logger.Log.Fatal("Critical boot failure: Failed to seed RSA Cryptographic Keys", zap.Error(err))
 	}
 
 	// 3. Initialize REST Presentation Handlers
 	authHand := handler.NewAuthHandler(authServ)
 	paymentHand := handler.NewPaymentHandler(paymentServ)
-
-	// Create the service FIRST, then pass it into the handler
 	subService := service.NewSubscriptionService()
-	subHand := handler.NewSubscriptionHandler(subService) // 💡 Changed from subServ to subService
-
+	subHand := handler.NewSubscriptionHandler(subService)
 	disputeHand := handler.NewDisputeHandler(disputeServ)
 	jwtHand := handler.NewJWTAuthHandler(jwtServ)
 
@@ -133,6 +117,14 @@ func main() {
 
 	// 5. Instantiate the Chi Router Engine
 	r := chi.NewRouter()
+
+	// --- GLOBAL MIDDLEWARES PLACED SECURELY AT THE VERY TOP ---
+	r.Use(middleware.RequestID)
+	r.Use(customMW.MetricsTracker)
+	r.Use(customMW.StructuredLogger)
+	r.Use(middleware.Recoverer)
+	r.Use(handler.CORSSecurityMiddleware)
+	r.Use(handler.RateLimitMiddleware)
 
 	// THE CORS FIX: Explicitly grant permission to your Swagger dashboard container
 	r.Use(func(next http.Handler) http.Handler {
@@ -149,18 +141,11 @@ func main() {
 		})
 	})
 
-	// 6. Attach Core Middleware Checkpoints
-	r.Use(middleware.RequestID)
-	r.Use(customMW.MetricsTracker)
-	r.Use(customMW.StructuredLogger)
-	r.Use(middleware.Recoverer)
-
-	// INITIALIZE REDIS ASYNQ BACKGROUND WORKER
-	// INITIALIZE REDIS ASYNQ BACKGROUND WORKER
+	// 6. INITIALIZE REDIS ASYNQ BACKGROUND WORKER
 	asynqServer := asynq.NewServer(
 		asynq.RedisClientOpt{
 			Addr:     cfg.RedisHost + ":" + cfg.RedisPort,
-			Password: os.Getenv("REDIS_PASSWORD"), // 🔥 Pass the direct environment password
+			Password: os.Getenv("REDIS_PASSWORD"),
 		},
 		asynq.Config{
 			Concurrency: 5,
@@ -171,9 +156,7 @@ func main() {
 		},
 	)
 
-	advancedWorker := service.NewAdvancedWebhookWorker(db, paymentRepo)
-	// 💡 The old subService line was deleted from here!
-	subHandler := handler.NewSubscriptionHandler(subService) // 💡 Ensure this points to subService
+	advancedWorker := service.NewAdvancedWebhookWorker(dbCluster.Master, paymentRepo)
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(tasks.TypeWebhookRetryEvent, advancedWorker.ProcessWebhookTask)
 
@@ -183,13 +166,12 @@ func main() {
 		}
 	}()
 
-	// EXPOSE OPEN PROMETHEUS METRICS SCRAPE ENDPOINT
+	// 7. Route Endpoint Registration
 	r.Handle("/metrics", promhttp.Handler())
-	// 👇 ADD THIS EXACT LINE RIGHT BELOW IT:
 	r.HandleFunc("/v1/healthcheck", healthcheckHandler)
-	r.HandleFunc("POST /v1/subscriptions", subHandler.CreateSubscriptionHandler)
+	r.HandleFunc("POST /v1/subscriptions", subHand.CreateSubscriptionHandler)
 
-	// 7. Map REST API Endpoint Resource Routes
+	// Map REST API Endpoint Resource Routes
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(rateMW.Limit)
 		r.Post("/auth/token", jwtHand.IssueTokenHandler)
@@ -200,11 +182,8 @@ func main() {
 		r.Post("/refunds", paymentHand.CreateRefundHandler)
 		r.Post("/subscriptions", subHand.CreateSubscriptionHandler)
 		r.Post("/disputes", disputeHand.CreateDisputeHandler)
-		// Then enforces the Token Bucket rate limit
-		r.Use(handler.CORSSecurityMiddleware)
-		r.Use(handler.RateLimitMiddleware)
 
-		// Day 23 Event Sourcing Audit History Track mapping
+		// Day 23 Event Sourcing Audit History Track mapping (Using Replica Node!)
 		r.Get("/payments/{id}/history", func(w http.ResponseWriter, r *http.Request) {
 			paymentID := chi.URLParam(r, "id")
 			analysis, err := auditRepo.AnalyzeTransitions(paymentID)
@@ -226,7 +205,6 @@ func main() {
 	}
 
 	// 8. Fire up the actual HTTP web server listener
-	// 8. Fire up the actual HTTP web server listener
 	log.Println("VaultPay API Engine Gateway launching on port :8080...")
 	err = http.ListenAndServe(":8080", r)
 	if err != nil {
@@ -234,7 +212,6 @@ func main() {
 	}
 }
 
-// Place this at the absolute bottom of the file (outside of any other functions)
 func healthcheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
