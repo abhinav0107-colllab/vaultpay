@@ -1,9 +1,13 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"time"
 
+	"github.com/abhinav0107-collab/vaultpay/internal/database"
 	"github.com/abhinav0107-collab/vaultpay/internal/service"
 
 	// 🔥 THESE IMPORTS REMOVE THE RED SQUIGGLES UNDER OTEL AND ATTRIBUTE
@@ -12,11 +16,15 @@ import (
 )
 
 type PaymentHandler struct {
-	paymentService *service.PaymentService
+	service service.PaymentService
+	locker  *database.DistributedLock // ◄ Add locker dependency field
 }
 
-func NewPaymentHandler(ps *service.PaymentService) *PaymentHandler {
-	return &PaymentHandler{paymentService: ps}
+func NewPaymentHandler(s service.PaymentService, l *database.DistributedLock) *PaymentHandler {
+	return &PaymentHandler{
+		service: s, // ◄ Ensure this matches the field name in your struct
+		locker:  l,
+	}
 }
 
 type ChargeRequest struct {
@@ -62,6 +70,30 @@ func (h *PaymentHandler) CreateChargeHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// ========================================================================
+	// 🔒 CONCURRENCY GUARD: Acquire Distributed Mutex via Redis
+	// ========================================================================
+	// Scoping the lock specifically to the User ID to prevent duplicate clicks
+	lockKey := req.UserID
+	lockToken, err := h.locker.AcquireLock(ctx, lockKey, 5*time.Second)
+	if err != nil {
+		if errors.Is(err, database.ErrLockHeld) {
+			span.SetAttributes(attribute.String("error.message", "Concurrency block triggered for lock key: "+lockKey))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"error": "Transaction processing in progress. Please don't double click."}`))
+			return
+		}
+		span.RecordError(err)
+		http.Error(w, "Internal concurrency lock malfunction", http.StatusInternalServerError)
+		return
+	}
+
+	// Ensure the lock is released when this handler finishes execution
+	defer func() {
+		_ = h.locker.ReleaseLock(context.Background(), lockKey, lockToken)
+	}()
+
 	// 2. Add extra searchable meta-tags to your Jaeger dashboard panel
 	span.SetAttributes(
 		attribute.String("payment.user_id", req.UserID),
@@ -69,8 +101,8 @@ func (h *PaymentHandler) CreateChargeHandler(w http.ResponseWriter, r *http.Requ
 		attribute.String("payment.currency", req.Currency),
 	)
 
-	// 3. Pass the traced 'ctx' context down to the service layer chain
-	payment, err := h.paymentService.ProcessCharge(ctx, req.UserID, req.Amount, req.Currency)
+	// 3. Pass the traced 'ctx' context down to the service layer chain (Fixed .paymentService -> .service)
+	payment, err := h.service.ProcessCharge(ctx, req.UserID, req.Amount, req.Currency)
 	if err != nil {
 		span.RecordError(err) // Log processing errors directly to the trace graph
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
@@ -95,7 +127,8 @@ func (h *PaymentHandler) CreateRefundHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	payment, err := h.paymentService.ProcessRefund(r.Context(), req.PaymentID)
+	// Fixed structural field reference from .paymentService -> .service
+	payment, err := h.service.ProcessRefund(r.Context(), req.PaymentID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return

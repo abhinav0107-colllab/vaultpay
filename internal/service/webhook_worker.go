@@ -11,12 +11,14 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+// 1. Ensure the struct field uses the interface definition
 type AdvancedWebhookWorker struct {
 	db          *sql.DB
-	paymentRepo *repository.PaymentRepository
+	paymentRepo repository.PaymentRepository // ◄ Remove any '*' pointer here if present
 }
 
-func NewAdvancedWebhookWorker(db *sql.DB, pr *repository.PaymentRepository) *AdvancedWebhookWorker {
+// 2. Update the constructor parameters to match
+func NewAdvancedWebhookWorker(db *sql.DB, pr repository.PaymentRepository) *AdvancedWebhookWorker { // ◄ Remove '*' from repository type
 	return &AdvancedWebhookWorker{
 		db:          db,
 		paymentRepo: pr,

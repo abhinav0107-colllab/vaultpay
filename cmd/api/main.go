@@ -56,7 +56,6 @@ func main() {
 	if err != nil {
 		logger.Log.Fatal("Critical boot failure: Database Cluster unreachable", zap.Error(err))
 	}
-	// REMOVED early defers here so connection lifecycle is managed completely inside our shutdown engine block
 
 	logger.Log.Info("Database Cluster Status: MASTER (Connected) | REPLICA (Connected)")
 	log.Println("🟢 PostgreSQL Connection: SUCCESSFUL")
@@ -80,6 +79,9 @@ func main() {
 	}
 	log.Println("🟢 Redis Connection: SUCCESSFUL")
 
+	// Initialize the Distributed Lock Engine
+	paymentLocker := database.NewDistributedLock(rdb)
+
 	// ========================================================================
 	// 🚀 ROUTER & HTTP ENGINE CORE
 	// ========================================================================
@@ -90,10 +92,10 @@ func main() {
 	keyRepo := repository.NewKeyRepository(dbCluster.Master)
 	paymentRepo := repository.NewPaymentRepository(dbCluster)
 	auditRepo := repository.NewAuditRepository(dbCluster)
-
+	outboxRepo := repository.NewOutboxRepository()
 	// 2. Initialize Core Domain Business Services
 	authServ := service.NewAuthService(keyRepo)
-	paymentServ := service.NewPaymentService(paymentRepo)
+	paymentServ := service.NewPaymentService(paymentRepo, outboxRepo)
 	disputeServ := service.NewDisputeService()
 
 	jwtServ, err := service.NewJWTAuthService(rdb, "private_key.pem", "public_key.pem")
@@ -103,7 +105,8 @@ func main() {
 
 	// 3. Initialize REST Presentation Handlers
 	authHand := handler.NewAuthHandler(authServ)
-	paymentHand := handler.NewPaymentHandler(paymentServ)
+	// Add an asterisk (*) to dereference the pointer type matching the constructor signature
+	paymentHand := handler.NewPaymentHandler(*paymentServ, paymentLocker)
 	subService := service.NewSubscriptionService()
 	subHand := handler.NewSubscriptionHandler(subService)
 	disputeHand := handler.NewDisputeHandler(disputeServ)

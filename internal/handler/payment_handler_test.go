@@ -40,9 +40,10 @@ func TestCreateChargeHandler_ComprehensiveValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Setup clean infrastructure dependencies for every test step iteration
 			paymentRepo := repository.NewPaymentRepository(nil)
-			paymentServ := service.NewPaymentService(paymentRepo)
-			paymentHand := handler.NewPaymentHandler(paymentServ)
-
+			// Update line 43 to include the nil outbox parameter
+			paymentServ := service.NewPaymentService(paymentRepo, nil) // Update line 44 to include the nil lock parameter
+			// Add an asterisk in front of paymentServ to pass it matching the interface signature
+			paymentHand := handler.NewPaymentHandler(*paymentServ, nil)
 			// Construct virtual HTTP request pipeline inside memory architecture
 			req, err := http.NewRequest("POST", "/v1/charges", bytes.NewBuffer([]byte(tc.requestPayload)))
 			if err != nil {

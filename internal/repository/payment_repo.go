@@ -18,58 +18,70 @@ type Payment struct {
 	Currency  string    `json:"currency"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"` // <-- ADD THIS LINE
-}
-type PaymentRepository struct {
-	cluster *database.DatabaseCluster // ◄ Changed from db *sql.DB
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Update your constructor function right below it to match:
-func NewPaymentRepository(cluster *database.DatabaseCluster) *PaymentRepository {
-	return &PaymentRepository{
+// TransactionQuery defines filters for cursor-based fetches
+
+// ========================================================================
+// 🛡️ INTERFACE DECLARATION FOR THE SERVICE LAYER
+// ========================================================================
+type PaymentRepository interface {
+	BeginTx(ctx context.Context) (*sql.Tx, error)
+	CreateTransactionRecord(ctx context.Context, userID string, amount int64, currency string) (*Payment, error)
+	CreateTransactionRecordTx(ctx context.Context, tx *sql.Tx, userID string, amount int64, currency string) (*Payment, error)
+	RefundTransactionRecord(ctx context.Context, paymentID string) (*Payment, error)
+	UpdatePaymentStatus(ctx context.Context, paymentID string, nextStatus string) error
+	GetPaginatedTransactions(ctx context.Context, q TransactionQuery) ([]Transaction, string, error)
+}
+
+type sqlPaymentRepository struct {
+	cluster *database.DatabaseCluster
+}
+
+// NewPaymentRepository instantiates our master-replica mapping layer matching the interface
+func NewPaymentRepository(cluster *database.DatabaseCluster) PaymentRepository {
+	return &sqlPaymentRepository{
 		cluster: cluster,
 	}
 }
 
-// CreateTransactionRecord applies an atomic database ledger change safely
-func (r *PaymentRepository) CreateTransactionRecord(ctx context.Context, userID string, amount int64, currency string) (*Payment, error) {
-	// 1. Configure the transaction options to enforce strict Serializable Isolation
+// ========================================================================
+// ⚡ TRANSACTION PROPAGATION METRIC CORES (Day 34)
+// ========================================================================
+
+// BeginTx safely initiates an atomic transaction context bound explicitly to the MASTER engine pool
+func (r *sqlPaymentRepository) BeginTx(ctx context.Context) (*sql.Tx, error) {
 	txOpts := &sql.TxOptions{
 		Isolation: sql.LevelSerializable,
 		ReadOnly:  false,
 	}
+	return r.cluster.Master.BeginTx(ctx, txOpts)
+}
 
-	// 2. Open the highly secure, isolated database transaction block
-	tx, err := r.cluster.Master.BeginTx(ctx, txOpts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open secure serializable transaction: %w", err)
-	}
-
-	// Rule: Defer a safe rollback. If the function exits early due to an error,
-	// any partial database adjustments are completely wiped clean.
-	defer tx.Rollback()
-
-	// 3. Fetch current balance and lock the row for update to prevent concurrent race conditions
+// CreateTransactionRecordTx processes ledger changes directly using an inherited transactional pointer
+func (r *sqlPaymentRepository) CreateTransactionRecordTx(ctx context.Context, tx *sql.Tx, userID string, amount int64, currency string) (*Payment, error) {
+	// 1. Fetch current balance and lock the row for update inside the existing tx frame
 	var currentBalance int64
 	balanceQuery := `SELECT balance FROM users WHERE id = $1 FOR UPDATE`
-	err = tx.QueryRowContext(ctx, balanceQuery, userID).Scan(&currentBalance)
+	err := tx.QueryRowContext(ctx, balanceQuery, userID).Scan(&currentBalance)
 	if err != nil {
-		return nil, fmt.Errorf("failed to look up target user balance: %w", err)
+		return nil, fmt.Errorf("failed to look up target user balance inside tx: %w", err)
 	}
 
-	// 4. Prevent overdraft limits
+	// 2. Prevent overdraft limits
 	if currentBalance < amount {
 		return nil, fmt.Errorf("insufficient account balances to clear transaction")
 	}
 
-	// 5. Update user account balance safely
+	// 3. Update user account balance safely
 	updateUserQuery := `UPDATE users SET balance = balance - $1 WHERE id = $2`
 	_, err = tx.ExecContext(ctx, updateUserQuery, amount, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to adjust user ledger balance accounts: %w", err)
 	}
 
-	// 6. Insert audit log tracking record into payments
+	// 4. Insert database record ledger tracking status
 	insertPaymentQuery := `
 		INSERT INTO payments (user_id, amount, currency, status)
 		VALUES ($1, $2, $3, 'COMPLETED')
@@ -83,7 +95,26 @@ func (r *PaymentRepository) CreateTransactionRecord(ctx context.Context, userID 
 		return nil, fmt.Errorf("failed to register permanent payment record log: %w", err)
 	}
 
-	// 7. Commit transaction safely to the database disk
+	return p, nil
+}
+
+// ========================================================================
+// 📦 STANDALONE ORIGINAL REPOSITORY METHOD CONTRACTS
+// ========================================================================
+
+// CreateTransactionRecord applies an independent atomic database ledger change safely
+func (r *sqlPaymentRepository) CreateTransactionRecord(ctx context.Context, userID string, amount int64, currency string) (*Payment, error) {
+	tx, err := r.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	p, err := r.CreateTransactionRecordTx(ctx, tx, userID, amount, currency)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit financial block adjustments: %w", err)
 	}
@@ -91,19 +122,17 @@ func (r *PaymentRepository) CreateTransactionRecord(ctx context.Context, userID 
 	return p, nil
 }
 
-// RefundTransactionRecord safely processes a refund event, validating the state machine rules
-func (r *PaymentRepository) RefundTransactionRecord(ctx context.Context, paymentID string) (*Payment, error) {
+// RefundTransactionRecord safely processes a refund event, validating state machine rules
+func (r *sqlPaymentRepository) RefundTransactionRecord(ctx context.Context, paymentID string) (*Payment, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	// Swapped r.db with r.cluster.Master
 	tx, err := r.cluster.Master.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open refund transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	// 1. Fetch current transaction status and merchant information under an exclusive FOR UPDATE lock
 	var p Payment
 	query := `
 		SELECT id, user_id, amount, currency, status, created_at, updated_at 
@@ -114,16 +143,16 @@ func (r *PaymentRepository) RefundTransactionRecord(ctx context.Context, payment
 	if err != nil {
 		return nil, fmt.Errorf("payment record not found or lock acquisition timed out: %w", err)
 	}
-	if p.Status != "succeeded" && p.Status != "paid" {
+	if p.Status != "succeeded" && p.Status != "paid" && p.Status != "COMPLETED" {
 		return nil, fmt.Errorf("invalid state transition: cannot refund a transaction with status '%s'", p.Status)
 	}
+
 	updateUserQuery := `UPDATE users SET balance = balance + $1 WHERE id = $2`
 	_, err = tx.ExecContext(ctx, updateUserQuery, p.Amount, p.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to return funds to user wallet balance: %w", err)
 	}
 
-	// 4. Update the payment status to 'refunded' inside our system matrix
 	updatePaymentQuery := `
 		UPDATE payments 
 		SET status = 'refunded', updated_at = CURRENT_TIMESTAMP 
@@ -135,7 +164,6 @@ func (r *PaymentRepository) RefundTransactionRecord(ctx context.Context, payment
 		return nil, fmt.Errorf("failed to update payment record lifecycle status: %w", err)
 	}
 
-	// 5. Securely commit our balance restorations onto the physical disk
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit financial refund block: %w", err)
 	}
@@ -144,7 +172,7 @@ func (r *PaymentRepository) RefundTransactionRecord(ctx context.Context, payment
 }
 
 // UpdatePaymentStatus updates the status of a specific payment tracking record
-func (r *PaymentRepository) UpdatePaymentStatus(ctx context.Context, paymentID string, nextStatus string) error {
+func (r *sqlPaymentRepository) UpdatePaymentStatus(ctx context.Context, paymentID string, nextStatus string) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
@@ -153,14 +181,12 @@ func (r *PaymentRepository) UpdatePaymentStatus(ctx context.Context, paymentID s
 		SET status = $1, updated_at = NOW() 
 		WHERE id = $2`
 
-	// Line 156 update: Change r.db to r.cluster.Master
 	_, err := r.cluster.Master.ExecContext(ctx, query, nextStatus, paymentID)
 	return err
 }
 
 // GetPaginatedTransactions fetches records using high-performance cursor-based pagination
-func (r *PaymentRepository) GetPaginatedTransactions(ctx context.Context, q TransactionQuery) ([]Transaction, string, error) {
-	// 1. Base query structure sorting chronologically backwards (newest first)
+func (r *sqlPaymentRepository) GetPaginatedTransactions(ctx context.Context, q TransactionQuery) ([]Transaction, string, error) {
 	query := `
 		SELECT id::text, amount, currency, status, created_at 
 		FROM payments 
@@ -171,16 +197,12 @@ func (r *PaymentRepository) GetPaginatedTransactions(ctx context.Context, q Tran
 	var rows *sql.Rows
 	var err error
 
-	// 2. Dynamically apply the cursor filter pointer if it exists
 	if q.NextCursor != "" {
-		// Since payments uses UUID/Serial IDs, we use standard string matching evaluation
 		filterClause := "WHERE id::text < $2"
 		sqlQuery := fmt.Sprintf(query, filterClause)
-		// ◄ Route to Replica!
 		rows, err = r.cluster.Replica.QueryContext(ctx, sqlQuery, q.Limit, q.NextCursor)
 	} else {
 		sqlQuery := fmt.Sprintf(query, "")
-		// ◄ Route to Replica!
 		rows, err = r.cluster.Replica.QueryContext(ctx, sqlQuery, q.Limit)
 	}
 
@@ -201,7 +223,6 @@ func (r *PaymentRepository) GetPaginatedTransactions(ctx context.Context, q Tran
 		lastID = t.ID
 	}
 
-	// 3. If we hit our full page limit capacity, pass back the last item's ID as the next page pointer
 	nextPageCursor := ""
 	if len(transactions) == q.Limit {
 		nextPageCursor = lastID
