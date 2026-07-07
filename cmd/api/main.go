@@ -93,6 +93,7 @@ func main() {
 	paymentRepo := repository.NewPaymentRepository(dbCluster)
 	auditRepo := repository.NewAuditRepository(dbCluster)
 	outboxRepo := repository.NewOutboxRepository()
+
 	// 2. Initialize Core Domain Business Services
 	authServ := service.NewAuthService(keyRepo)
 	paymentServ := service.NewPaymentService(paymentRepo, outboxRepo)
@@ -170,6 +171,17 @@ func main() {
 		}
 	}()
 
+	// Instantiate the Asynq Client Handle tool for Outbox propagation loops
+	asynqClient := asynq.NewClient(asynq.RedisClientOpt{
+		Addr:     cfg.RedisHost + ":" + cfg.RedisPort,
+		Password: os.Getenv("REDIS_PASSWORD"),
+	})
+	defer asynqClient.Close()
+
+	// 6.5 INITIALIZE TRANSACTIONAL OUTBOX DAEMON ENGINE (Day 35)
+	outboxWorker := service.NewOutboxWorker(dbCluster, asynqClient, 2*time.Second)
+	outboxWorker.Start()
+
 	// 7. Route Endpoint Registration
 	r.Handle("/metrics", promhttp.Handler())
 	r.HandleFunc("/v1/healthcheck", healthcheckHandler)
@@ -242,6 +254,11 @@ func main() {
 	} else {
 		log.Println("Byebye 🟢 HTTP gateway drained and stopped safely.")
 	}
+
+	// 1.5 Terminate and stop your Outbox polling engine tickers safely
+	log.Println("Shutting down Transactional Outbox Worker daemon pools...")
+	outboxWorker.Stop()
+	log.Println("🟢 Outbox Poller daemon stopped cleanly.")
 
 	// 2. Shutdown Asynq Background Daemon Workers cleanly
 	log.Println("Draining and shutting down async worker queues...")

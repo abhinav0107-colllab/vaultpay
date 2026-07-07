@@ -84,7 +84,7 @@ func (r *sqlPaymentRepository) CreateTransactionRecordTx(ctx context.Context, tx
 	// 4. Insert database record ledger tracking status
 	insertPaymentQuery := `
 		INSERT INTO payments (user_id, amount, currency, status)
-		VALUES ($1, $2, $3, 'COMPLETED')
+		VALUES ($1, $2, $3, 'succeeded')
 		RETURNING id, user_id, amount, currency, status, created_at`
 
 	p := &Payment{}

@@ -34,3 +34,11 @@
 {"level":"info","timestamp":"2026-07-07T10:28:32.187+0530","caller":"api/main.go:60","msg":"Database Cluster Status: MASTER (Connected) | REPLICA (Connected)"}
 {"level":"info","timestamp":"2026-07-07T10:30:49.244+0530","caller":"api/main.go:53","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
 {"level":"info","timestamp":"2026-07-07T10:30:49.269+0530","caller":"api/main.go:60","msg":"Database Cluster Status: MASTER (Connected) | REPLICA (Connected)"}
+{"level":"info","timestamp":"2026-07-07T11:15:01.591+0530","caller":"api/main.go:53","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
+{"level":"info","timestamp":"2026-07-07T11:15:01.671+0530","caller":"api/main.go:60","msg":"Database Cluster Status: MASTER (Connected) | REPLICA (Connected)"}
+{"level":"info","timestamp":"2026-07-07T11:23:12.405+0530","caller":"middleware/logger.go:25","msg":"HTTP Request Processed","method":"POST","path":"/v1/charges","status":422,"duration":0.0155712,"req_id":"Abhinav_Reddy/Lq3dJitPcF-000001"}
+{"level":"info","timestamp":"2026-07-07T16:16:08.082+0530","caller":"api/main.go:53","msg":"Connecting to Database Cluster (Master & Replica Nodes)..."}
+{"level":"info","timestamp":"2026-07-07T16:16:08.235+0530","caller":"api/main.go:60","msg":"Database Cluster Status: MASTER (Connected) | REPLICA (Connected)"}
+{"level":"info","timestamp":"2026-07-07T16:16:57.409+0530","caller":"middleware/logger.go:25","msg":"HTTP Request Processed","method":"POST","path":"/v1/charges","status":422,"duration":0.0145241,"req_id":"Abhinav_Reddy/1xkJ7KjKrO-000001"}
+{"level":"info","timestamp":"2026-07-07T16:18:54.995+0530","caller":"middleware/logger.go:25","msg":"HTTP Request Processed","method":"POST","path":"/v1/charges","status":422,"duration":0.0081448,"req_id":"Abhinav_Reddy/1xkJ7KjKrO-000002"}
+{"level":"info","timestamp":"2026-07-07T16:23:04.678+0530","caller":"middleware/logger.go:25","msg":"HTTP Request Processed","method":"POST","path":"/v1/charges","status":422,"duration":0.0229742,"req_id":"Abhinav_Reddy/1xkJ7KjKrO-000003"}
