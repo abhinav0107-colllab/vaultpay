@@ -1,52 +1,65 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
+	"time"
 
 	"github.com/abhinav0107-collab/vaultpay/internal/repository"
-	"github.com/abhinav0107-collab/vaultpay/internal/tasks"
 	"github.com/hibiken/asynq"
 )
 
-// 1. Ensure the struct field uses the interface definition
 type AdvancedWebhookWorker struct {
 	db          *sql.DB
-	paymentRepo repository.PaymentRepository // ◄ Remove any '*' pointer here if present
+	paymentRepo repository.PaymentRepository
+	httpClient  *http.Client
 }
 
-// 2. Update the constructor parameters to match
-func NewAdvancedWebhookWorker(db *sql.DB, pr repository.PaymentRepository) *AdvancedWebhookWorker { // ◄ Remove '*' from repository type
+func NewAdvancedWebhookWorker(db *sql.DB, pr repository.PaymentRepository) *AdvancedWebhookWorker {
 	return &AdvancedWebhookWorker{
 		db:          db,
 		paymentRepo: pr,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second, // Always enforce timeouts for outbound client requests
+		},
 	}
 }
 
-// ProcessWebhookTask executes task routines safely using Postgres Advisory Locks
+// ProcessWebhookTask consumes events forwarded by the Outbox Poller from Asynq/Redis
 func (w *AdvancedWebhookWorker) ProcessWebhookTask(ctx context.Context, t *asynq.Task) error {
-	var payload tasks.WebhookPayload
-	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
-		return err
-	}
+	log.Printf("🚀 Asynq Worker: Processing webhook task event: %s", t.Type())
 
-	log.Printf("📥 Processing distributed webhook queue item for payment: %s", payload.PaymentID)
+	// 1. In a production pipeline, your payload typically contains the target URL and metadata.
+	// For testing purposes, we will mock sending this to a simulated merchant dashboard endpoint.
+	targetMerchantURL := "http://httpbin.org/post"
 
-	// 🔥 ACCORDING TO TECH REQS: Obtain an exclusive session-level transactional Advisory Lock
-	// We use a simple hash integer logic to map the payment string to a numeric database key lock space
-	lockKey := 1234567
-
-	_, err := w.db.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey)
+	// 2. Dispatch the outbound POST request with the event payload
+	req, err := http.NewRequestWithContext(ctx, "POST", targetMerchantURL, bytes.NewBuffer(t.Payload()))
 	if err != nil {
-		log.Printf("❌ Failed to obtain PostgreSQL Advisory lock boundary: %v", err)
-		return err
+		log.Printf("❌ Failed to construct outbound webhook request: %v", err)
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "VaultPay-Webhook-Dispatcher/1.0")
+
+	resp, err := w.httpClient.Do(req)
+	if err != nil {
+		log.Printf("⚠️ Webhook Delivery Failed (Network Error): %v. Flagging for automatic Asynq retry...", err)
+		// Returning an error automatically tells Asynq to kick off its built-in exponential backoff retry system!
+		return fmt.Errorf("network delivery failure: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 3. Evaluate the merchant response status code
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("⚠️ Merchant returned unhealthy status code: %d. Retrying...", resp.StatusCode)
+		return fmt.Errorf("merchant unhealthy response status: %d", resp.StatusCode)
 	}
 
-	// Inside this lock block, we execute our webhook dispatch safely without race condition concerns
-	log.Printf("🔒 Advisory Lock secured. Dispatching payment payload to client endpoint -> %s", payload.TargetURL)
-
-	// Simulate successful network outbound call delivery
+	log.Printf("✅ Webhook delivered successfully to %s! Status: %s", targetMerchantURL, resp.Status)
 	return nil
 }
