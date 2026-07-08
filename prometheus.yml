@@ -1,7 +1,15 @@
 global:
-  scrape_interval: 5s
+  scrape_interval: 15s  # How frequently to poll targets for metrics
+  evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: 'vaultpay-service-monitor'
+  # 📊 Scrape target for the VaultPay core API engine
+  - job_name: 'vaultpay-api'
+    scrape_interval: 5s # Faster polling for local development metrics
     static_configs:
-      - targets: ['vaultpay-api:8080']
+      - targets: ['vaultpay-service:8080'] # Points straight to your app container port
+
+  # 📈 Scrape target for Prometheus monitoring itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
