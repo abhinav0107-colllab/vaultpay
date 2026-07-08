@@ -17,7 +17,6 @@ export default function () {
       'Content-Type': 'application/json',
       'X-Idempotency-Key': `k6-test-${Math.random()}-${__ITER}`,
     },
-    // ⬇️ THIS IS THE SECRET MAGIC KEY FOR K6 ⬇️
     responseCallback: http.expectedStatuses({ min: 200, max: 499 }), 
   };
 
@@ -29,7 +28,7 @@ export default function () {
 
   const res = http.post(url, payload, params);
 
-  // Validate that the system responded with a valid HTTP API status code
+  
   check(res, {
     'API gateway handling traffic normally': (r) => r.status >= 200 && r.status < 500,
   });
